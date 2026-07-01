@@ -532,18 +532,25 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
+  // CTA portfolio IDs for BC_AUTH_TT + TikTok placement (call_to_action_list not supported)
+  const CTA_PORTFOLIO_IDS = {
+    LEARN_MORE: '7654255502322404372',
+    SHOP_NOW: '7654256510972791828',
+  };
+  const call_to_action_id = CTA_PORTFOLIO_IDS[row.cta] || CTA_PORTFOLIO_IDS.LEARN_MORE;
+
   // Smart Plus creative_list limit is 50; split if needed
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
     const ad_configuration = {
       ...creativeIdentity,
+      call_to_action_id,
     };
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
       ad_configuration,
       ad_text_list,
-      call_to_action_list: [{ call_to_action: row.cta }],
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
     });
