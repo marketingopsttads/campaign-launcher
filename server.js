@@ -696,10 +696,20 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
           urlToId[url] = dup_id;
           coverPromises[dup_id] = getVideoCoverImageId(dup_id, adv_id);
         } else {
-          // Can't recover — warn and skip this video
-          const warn = `Video ${videoNum} skipped (duplicate detected, ID not returned): ${url}`;
-          console.warn(warn);
-          if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `⚠ ${warn}` });
+          // Fall back to library search using the URL tail (unique per V1/V2/V3)
+          const fullName = url.split('/').pop().replace(/\.[^.]+$/, '');
+          const searchTail = fullName.slice(-50);
+          const existing_id = await findExistingVideo(searchTail, adv_id);
+          if (existing_id) {
+            console.log(`Reusing existing video for ${url}: ${existing_id}`);
+            ids.push(existing_id);
+            urlToId[url] = existing_id;
+            coverPromises[existing_id] = getVideoCoverImageId(existing_id, adv_id);
+          } else {
+            const warn = `Video ${videoNum} skipped (duplicate, not found in library): ${url}`;
+            console.warn(warn);
+            if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `⚠ ${warn}` });
+          }
         }
       } else {
         const warn = `Video ${videoNum} failed (code=${res.code}): ${res.message}`;
