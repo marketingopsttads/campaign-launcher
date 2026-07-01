@@ -510,6 +510,13 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   // Smart Plus: pass all video creatives + all headlines in one ad; TikTok rotates/optimizes
   // image_info (cover) is required for every SINGLE_VIDEO creative
+  const resolvedIdentityType = identity_type || 'BC_AUTH_TT';
+  const creativeIdentity = {
+    identity_type: resolvedIdentityType,
+    identity_id,
+    ...(resolvedIdentityType === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id || BC_ID } : {}),
+  };
+
   const creative_list = video_ids.map(video_id => {
     const cover = coverMap[video_id];
     if (!cover) throw new Error(`Could not fetch cover image for video ${video_id} — required for Smart Plus ads`);
@@ -518,6 +525,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
         ad_format: 'SINGLE_VIDEO',
         video_info: { video_id },
         image_info: [{ web_uri: cover }],
+        ...creativeIdentity,
       },
     };
   });
@@ -528,9 +536,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
     const ad_configuration = {
-      identity_type: identity_type || 'CUSTOMIZED_USER',
-      identity_id,
-      ...(identity_type === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id } : {}),
+      ...creativeIdentity,
     };
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
