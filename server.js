@@ -384,7 +384,7 @@ async function createAdGroup(row, campaign_id) {
     placement_type: 'PLACEMENT_TYPE_AUTOMATIC',
     budget_mode: 'BUDGET_MODE_DAY',
     budget: row.budget,
-    schedule_type: 'SCHEDULE_FROM_NOW',
+    schedule_type: 'SCHEDULE_START_END',
     schedule_start_time: schedule_start,
     optimization_goal: 'CONVERT',
     billing_event: 'OCPM',
