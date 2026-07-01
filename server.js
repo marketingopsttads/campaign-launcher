@@ -572,12 +572,16 @@ async function createCampaign(row, adv_id) {
 }
 
 async function findExistingVideo(baseName, adv_id) {
-  const baseCore = baseName.replace(/^\d+_/, '').replace(/[_\s-]+/g, ' ').toLowerCase().slice(0, 25);
+  // Use full baseName (not truncated) so similar filenames don't cross-match
+  const baseCore = baseName.replace(/^\d+_/, '').replace(/[_\s-]+/g, ' ').toLowerCase();
   for (let page = 1; page <= 15; page++) {
     try {
       const res = await ttGet('/file/video/ad/search/', { page, page_size: 20 }, adv_id);
       const list = res.data?.list || [];
-      const match = list.find(v => v.file_name?.replace(/[_\s-]+/g, ' ').toLowerCase().includes(baseCore));
+      const match = list.find(v => {
+        const norm = (v.file_name || '').replace(/[_\s-]+/g, ' ').toLowerCase();
+        return norm.includes(baseCore);
+      });
       if (match) return match.video_id;
       const total = res.data?.page_info?.total_number || 0;
       if (page * 20 >= total) break;
@@ -590,7 +594,13 @@ async function uploadVideos(urls, adv_id) {
   const ids = [];
   const coverPromises = {};
   const errors = [];
+  const urlToId = {}; // cache URL→video_id within this upload batch
   for (const url of urls) {
+    // If the same URL appears more than once in the sheet, reuse the first upload
+    if (urlToId[url]) {
+      ids.push(urlToId[url]);
+      continue;
+    }
     try {
       const baseName = url.split('/').pop().replace(/\.[^.]+$/, '').slice(0, 40);
       const rand = Math.random().toString(36).slice(2, 8);
@@ -602,15 +612,19 @@ async function uploadVideos(urls, adv_id) {
         flaw_detect: true,
         auto_fix_enabled: true,
       }, adv_id);
+      // TikTok may return video_id even on success or duplicate responses
       const video_id = res.data?.video_id || res.data?.[0]?.video_id;
       if (video_id) {
         ids.push(video_id);
+        urlToId[url] = video_id;
         coverPromises[video_id] = getVideoCoverImageId(video_id, adv_id);
       } else if (res.code === 40911) {
+        // Duplicate: search by baseName — must be specific enough to avoid cross-matches
         const existing_id = await findExistingVideo(baseName, adv_id);
         if (existing_id) {
           console.log(`Reusing existing video for ${url}: ${existing_id}`);
           ids.push(existing_id);
+          urlToId[url] = existing_id;
           coverPromises[existing_id] = getVideoCoverImageId(existing_id, adv_id);
         } else {
           errors.push(`Upload failed (duplicate) and could not find existing video for ${url}`);
