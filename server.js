@@ -723,6 +723,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
         ad_format: 'SINGLE_VIDEO',
         video_info: { video_id },
         image_info: [{ web_uri: cover }],
+        aigc_disclosure_type: 'SELF_DISCLOSURE',
         ...creativeIdentity,
       },
     };
