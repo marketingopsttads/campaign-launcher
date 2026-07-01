@@ -14,7 +14,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours
+  cookie: { maxAge: 8 * 60 * 60 * 1000 },
 }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -28,24 +28,23 @@ const APP_ID = process.env.TIKTOK_APP_ID;
 const APP_SECRET = process.env.TIKTOK_APP_SECRET;
 const REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI || 'https://campaigns.videosapi.net/auth/callback';
 
-// Token stored in memory — survives until restart, then re-auth needed
 let activeToken = process.env.TIKTOK_ACCESS_TOKEN || null;
-
 function getToken() { return activeToken; }
 
-async function ttGet(path, params = {}) {
+// adv_id defaults to env ADV_ID so existing calls work unchanged
+async function ttGet(path, params = {}, adv_id = ADV_ID) {
   const url = new URL(`${TT_BASE}${path}`);
-  url.searchParams.set('advertiser_id', ADV_ID);
+  if (adv_id) url.searchParams.set('advertiser_id', adv_id);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v));
   const res = await fetch(url.toString(), { headers: { 'Access-Token': getToken() } });
   return res.json();
 }
 
-async function ttPost(path, body) {
+async function ttPost(path, body, adv_id = ADV_ID) {
   const res = await fetch(`${TT_BASE}${path}`, {
     method: 'POST',
     headers: { 'Access-Token': getToken(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ advertiser_id: ADV_ID, ...body }),
+    body: JSON.stringify({ advertiser_id: adv_id, ...body }),
   });
   return res.json();
 }
@@ -61,7 +60,6 @@ app.get('/auth', requireAuth, (req, res) => {
   res.redirect(url.toString());
 });
 
-// User pastes the auth_code from the advertising.tech redirect URL
 app.post('/api/exchange-token', requireAuth, async (req, res) => {
   const { auth_code } = req.body;
   if (!auth_code) return res.status(400).json({ error: 'auth_code required' });
@@ -74,6 +72,7 @@ app.post('/api/exchange-token', requireAuth, async (req, res) => {
     const data = await r.json();
     if (data.data?.access_token) {
       activeToken = data.data.access_token;
+      pixelCache = {}; // clear cache on token refresh
       console.log('TikTok token exchanged successfully');
       res.json({ ok: true });
     } else {
@@ -124,8 +123,10 @@ function requireAuth(req, res, next) {
   res.status(401).json({ error: 'Unauthorized' });
 }
 
-// ── In-memory job store ────────────────────────────────────────────────────
-const jobs = new Map(); // jobId -> { rows: [], status: 'running'|'done', clients: Set }
+// ── In-memory stores ───────────────────────────────────────────────────────
+const jobs = new Map();
+const campaignLogs = []; // persists for session lifetime
+let pixelCache = {};     // adv_id -> pixel_id
 
 function jobEmit(jobId, event) {
   const job = jobs.get(jobId);
@@ -147,14 +148,8 @@ app.post('/api/login', (req, res) => {
   }
 });
 
-app.post('/api/logout', (req, res) => {
-  req.session.destroy();
-  res.json({ ok: true });
-});
-
-app.get('/api/me', (req, res) => {
-  res.json({ user: req.session.user || null });
-});
+app.post('/api/logout', (req, res) => { req.session.destroy(); res.json({ ok: true }); });
+app.get('/api/me', (req, res) => { res.json({ user: req.session.user || null }); });
 
 app.get('/api/identities', requireAuth, async (req, res) => {
   try {
@@ -173,18 +168,50 @@ app.get('/api/identities', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/accounts', requireAuth, async (req, res) => {
+  try {
+    const url = new URL(`${TT_BASE}/oauth2/advertiser/get/`);
+    url.searchParams.set('app_id', APP_ID);
+    url.searchParams.set('secret', APP_SECRET);
+    const r = await fetch(url.toString(), { headers: { 'Access-Token': getToken() } });
+    const data = await r.json();
+    if (data.code !== 0) return res.status(502).json({ error: `TikTok API error ${data.code}: ${data.message}` });
+    const list = (data.data?.list || []).map(a => ({
+      id: String(a.advertiser_id),
+      name: a.advertiser_name,
+    }));
+    // Always include the env default account if not already in list
+    if (ADV_ID && !list.find(a => a.id === ADV_ID)) {
+      try {
+        const info = await ttGet('/advertiser/info/', { fields: JSON.stringify(['advertiser_name']) });
+        const name = info.data?.list?.[0]?.advertiser_name || `Account ${ADV_ID}`;
+        list.unshift({ id: ADV_ID, name });
+      } catch (_) {
+        list.unshift({ id: ADV_ID, name: `Account ${ADV_ID}` });
+      }
+    }
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/logs', requireAuth, (req, res) => {
+  res.json([...campaignLogs].reverse());
+});
+
 app.get('/sample', (req, res) => {
   const headers = [
-    'campaign_name','geo','budget','bid_strategy','bid_amount','targeting',
+    'account_name','campaign_name','geo','budget','bid_strategy','bid_amount','targeting',
     'start_date','start_time',
     'video_url_1','video_url_2','video_url_3','video_url_4','video_url_5',
     'video_url_6','video_url_7','video_url_8','video_url_9','video_url_10',
     'headline_1','headline_2','headline_3','headline_4','headline_5',
-    'cta','url',
+    'url',
   ];
   const rows = [
     {
-      campaign_name: 'BOZV_Jul30', geo: 'US', budget: 30,
+      account_name: 'My Account Name', campaign_name: 'BOZV_Jul30', geo: 'US', budget: 30,
       bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
       start_date: '10/07/2026', start_time: '00:00',
       video_url_1: 'https://videosapi.net/videos/example1.mp4',
@@ -194,10 +221,10 @@ app.get('/sample', (req, res) => {
       video_url_9: '', video_url_10: '',
       headline_1: 'Lose weight fast', headline_2: 'Try it free today',
       headline_3: 'Results in 7 days', headline_4: '', headline_5: '',
-      cta: 'LEARN_MORE', url: 'https://yoursite.com/landing',
+      url: 'https://yoursite.com/landing',
     },
     {
-      campaign_name: 'MT_Jul30', geo: 'US', budget: 50,
+      account_name: 'My Account Name', campaign_name: 'MT_Jul30', geo: 'US', budget: 50,
       bid_strategy: 'COST_CAP', bid_amount: 15, targeting: 'AGE_35_PLUS',
       start_date: '10/07/2026', start_time: '08:00',
       video_url_1: 'https://videosapi.net/videos/example3.mp4',
@@ -206,7 +233,7 @@ app.get('/sample', (req, res) => {
       video_url_9: '', video_url_10: '',
       headline_1: 'Save more today', headline_2: 'Start saving now',
       headline_3: '', headline_4: '', headline_5: '',
-      cta: 'SHOP_NOW', url: 'https://yoursite.com/offer',
+      url: 'https://yoursite.com/offer',
     },
   ];
 
@@ -238,6 +265,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
       }
       return {
         rowIndex: i,
+        account_name: r.account_name || '',
         campaign_name: r.campaign_name,
         geo: (r.geo || '').toUpperCase(),
         budget: parseFloat(r.budget),
@@ -248,7 +276,6 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
         start_time: r.start_time || '00:00',
         videos,
         headlines,
-        cta: r.cta || 'LEARN_MORE',
         url: r.url,
         status: 'pending',
         error: null,
@@ -263,15 +290,14 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
 });
 
 app.post('/api/deploy', requireAuth, async (req, res) => {
-  const { rows, identity_id, identity_type, identity_bc_id } = req.body;
+  const { rows, identity_id, identity_type, identity_bc_id, accountsMap } = req.body;
   if (!rows?.length) return res.status(400).json({ error: 'No rows' });
 
   const jobId = uuidv4();
   jobs.set(jobId, { events: [], clients: new Set(), status: 'running' });
   res.json({ jobId });
 
-  // Run deployment in background
-  deployRows(jobId, rows, identity_id, identity_type, identity_bc_id).catch(console.error);
+  deployRows(jobId, rows, identity_id, identity_type, identity_bc_id, accountsMap || {}).catch(console.error);
 });
 
 app.get('/api/deploy/:jobId/events', requireAuth, (req, res) => {
@@ -282,49 +308,85 @@ app.get('/api/deploy/:jobId/events', requireAuth, (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  // Send buffered events first
   job.events.forEach(e => res.write(`data: ${JSON.stringify(e)}\n\n`));
-
   if (job.status === 'done') return res.end();
 
   job.clients.add(res);
   req.on('close', () => job.clients.delete(res));
 });
 
+// ── Pixel lookup per account ───────────────────────────────────────────────
+async function getPixelForAccount(adv_id) {
+  if (pixelCache[adv_id]) return pixelCache[adv_id];
+  try {
+    const data = await ttGet('/pixel/list/get/', {}, adv_id);
+    const pixel = (data.data?.list || []).find(p => p.status === 'ACTIVE') || data.data?.list?.[0];
+    const pid = pixel?.pixel_id || PIXEL_ID;
+    pixelCache[adv_id] = pid;
+    return pid;
+  } catch (_) {
+    return PIXEL_ID;
+  }
+}
+
 // ── Deployment logic ───────────────────────────────────────────────────────
-async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_id) {
+async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_id, accountsMap) {
   for (const row of rows) {
+    const adv_id = accountsMap[row.account_name] || ADV_ID;
+    const account_name = row.account_name || 'Default';
+
     jobEmit(jobId, { type: 'row_start', rowIndex: row.rowIndex, campaign_name: row.campaign_name });
 
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      account_name,
+      advertiser_id: adv_id,
+      campaign_name: row.campaign_name,
+      geo: row.geo,
+      budget: row.budget,
+      bid_strategy: row.bid_strategy,
+      bid_amount: row.bid_amount,
+      video_count: row.videos.length,
+      headline_count: row.headlines.length,
+      status: 'error',
+      campaign_id: null,
+      error: null,
+    };
+
     try {
-      // 1. Create campaign
+      const pixel_id = await getPixelForAccount(adv_id);
+
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating campaign…' });
-      const campaign = await createCampaign(row);
+      const campaign = await createCampaign(row, adv_id);
       const campaign_id = campaign.data?.campaign_id;
       if (!campaign_id) {
         const msg = campaign.message || JSON.stringify(campaign);
-        throw new Error(campaign.code === 40911 || (msg && msg.includes('already')) ? `Campaign name "${row.campaign_name}" already exists in TikTok — rename it in the CSV and retry` : `Campaign failed: ${msg}`);
+        throw new Error(campaign.code === 40911 || (msg && msg.includes('already'))
+          ? `Campaign name "${row.campaign_name}" already exists — rename it in the CSV and retry`
+          : `Campaign failed: ${msg}`);
       }
 
-      // 2. Upload videos — cover fetches start immediately in background
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Uploading ${row.videos.length} video(s)…` });
-      const { ids: video_ids, coverPromises } = await uploadVideos(row.videos);
+      const { ids: video_ids, coverPromises } = await uploadVideos(row.videos, adv_id);
 
-      // 3. Create ad group (cover fetches run in parallel while this completes)
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating ad group…' });
-      const adgroup = await createAdGroup(row, campaign_id);
+      const adgroup = await createAdGroup(row, campaign_id, adv_id, pixel_id);
       const adgroup_id = adgroup.data?.adgroup_id;
       if (!adgroup_id) throw new Error(`Ad group failed: ${JSON.stringify(adgroup)}`);
 
-      // 4. Create ads — covers should be ready or nearly ready by now
-      jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Creating ads…` });
-      await createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises);
+      jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating ads…' });
+      await createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises, adv_id);
 
+      logEntry.status = 'success';
+      logEntry.campaign_id = campaign_id;
       jobEmit(jobId, { type: 'row_done', rowIndex: row.rowIndex, campaign_id });
 
     } catch (err) {
+      logEntry.error = err.message;
       jobEmit(jobId, { type: 'row_error', rowIndex: row.rowIndex, error: err.message });
     }
+
+    campaignLogs.push(logEntry);
   }
 
   jobEmit(jobId, { type: 'done' });
@@ -335,8 +397,8 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
   }
 }
 
-async function createCampaign(row) {
-  const body = {
+async function createCampaign(row, adv_id) {
+  return ttPost('/smart_plus/campaign/create/', {
     request_id: Date.now().toString(),
     campaign_name: row.campaign_name,
     objective_type: 'WEB_CONVERSIONS',
@@ -345,34 +407,27 @@ async function createCampaign(row) {
     budget_mode: 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET',
     budget: row.budget,
     operation_status: 'ENABLE',
-  };
-  return ttPost('/smart_plus/campaign/create/', body);
+  }, adv_id);
 }
 
-async function findExistingVideo(baseName) {
-  // Strip leading numeric prefix and normalize for matching
+async function findExistingVideo(baseName, adv_id) {
   const baseCore = baseName.replace(/^\d+_/, '').replace(/[_\s-]+/g, ' ').toLowerCase().slice(0, 25);
   for (let page = 1; page <= 15; page++) {
     try {
-      const res = await ttGet('/file/video/ad/search/', { page, page_size: 20 });
+      const res = await ttGet('/file/video/ad/search/', { page, page_size: 20 }, adv_id);
       const list = res.data?.list || [];
-      const match = list.find(v => {
-        if (!v.file_name) return false;
-        return v.file_name.replace(/[_\s-]+/g, ' ').toLowerCase().includes(baseCore);
-      });
+      const match = list.find(v => v.file_name?.replace(/[_\s-]+/g, ' ').toLowerCase().includes(baseCore));
       if (match) return match.video_id;
       const total = res.data?.page_info?.total_number || 0;
       if (page * 20 >= total) break;
-    } catch (e) {
-      break;
-    }
+    } catch (_) { break; }
   }
   return null;
 }
 
-async function uploadVideos(urls) {
+async function uploadVideos(urls, adv_id) {
   const ids = [];
-  const coverPromises = {}; // video_id -> Promise<image_id|null>, started immediately after upload
+  const coverPromises = {};
   const errors = [];
   for (const url of urls) {
     try {
@@ -385,50 +440,41 @@ async function uploadVideos(urls) {
         video_name,
         flaw_detect: true,
         auto_fix_enabled: true,
-      });
+      }, adv_id);
       const video_id = res.data?.video_id || res.data?.[0]?.video_id;
       if (video_id) {
         ids.push(video_id);
-        coverPromises[video_id] = getVideoCoverImageId(video_id); // fire and forget — runs while campaign/adgroup are created
+        coverPromises[video_id] = getVideoCoverImageId(video_id, adv_id);
       } else if (res.code === 40911) {
-        const existing_id = await findExistingVideo(baseName);
+        const existing_id = await findExistingVideo(baseName, adv_id);
         if (existing_id) {
           console.log(`Reusing existing video for ${url}: ${existing_id}`);
           ids.push(existing_id);
-          coverPromises[existing_id] = getVideoCoverImageId(existing_id);
+          coverPromises[existing_id] = getVideoCoverImageId(existing_id, adv_id);
         } else {
-          const msg = `Upload failed (duplicate) and could not find existing video for ${url}`;
-          console.warn(msg);
-          errors.push(msg);
+          errors.push(`Upload failed (duplicate) and could not find existing video for ${url}`);
         }
       } else {
-        const msg = `Upload failed for ${url}: code=${res.code} msg=${res.message} data=${JSON.stringify(res.data)}`;
-        console.warn(msg);
-        errors.push(msg);
+        errors.push(`Upload failed for ${url}: code=${res.code} msg=${res.message}`);
       }
     } catch (e) {
-      const msg = `Upload error for ${url}: ${e.message}`;
-      console.warn(msg);
-      errors.push(msg);
+      errors.push(`Upload error for ${url}: ${e.message}`);
     }
   }
   if (!ids.length) throw new Error(errors.join(' | ') || 'No videos uploaded successfully');
   return { ids, coverPromises };
 }
 
-async function createAdGroup(row, campaign_id) {
+async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
   const location_id = GEO_MAP[row.geo];
   if (!location_id) throw new Error(`Unknown geo: ${row.geo}`);
 
-  // Parse date: handles YYYY-MM-DD or DD/MM/YYYY or MM/DD/YYYY -> YYYY-MM-DD
   const rawDate = (row.start_date || '').toString().trim();
   let datePart = rawDate;
   const slashMatch = rawDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (slashMatch) {
-    // Treat as DD/MM/YYYY (Excel default in many locales)
     datePart = `${slashMatch[3]}-${slashMatch[2].padStart(2,'0')}-${slashMatch[1].padStart(2,'0')}`;
   }
-  // Parse time: handles "8:00", "08:00", blank -> "00:00"
   const rawTime = (row.start_time || '').toString().trim();
   let hh = '00', mm = '00';
   const timeMatch = rawTime.match(/(\d{1,2}):(\d{2})/);
@@ -440,7 +486,7 @@ async function createAdGroup(row, campaign_id) {
     ...(row.targeting === 'AGE_35_PLUS' ? { age_groups: ['AGE_35_44', 'AGE_45_54', 'AGE_55_100'] } : {}),
   };
 
-  const body = {
+  return ttPost('/smart_plus/adgroup/create/', {
     request_id: (Date.now() + 1).toString(),
     campaign_id,
     adgroup_name: `${row.campaign_name}_adgroup`,
@@ -451,41 +497,34 @@ async function createAdGroup(row, campaign_id) {
     targeting_spec,
     optimization_goal: 'CONVERT',
     billing_event: 'OCPM',
-    pixel_id: PIXEL_ID,
+    pixel_id,
     optimization_event: 'SHOPPING',
     schedule_type: 'SCHEDULE_FROM_NOW',
     schedule_start_time: schedule_start,
     bid_type: row.bid_strategy === 'COST_CAP' ? 'BID_TYPE_CUSTOM' : 'BID_TYPE_NO_BID',
     ...(row.bid_strategy === 'COST_CAP' && row.bid_amount ? { conversion_bid_price: row.bid_amount } : {}),
-  };
-
-  return ttPost('/smart_plus/adgroup/create/', body);
+  }, adv_id);
 }
 
-async function getVideoCoverImageId(video_id) {
-  // suggestcover needs 30s–5min after upload per TikTok docs; retry up to 20× (3.5min total)
-  // For reused/existing videos it works on the first call
+async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
   for (let attempt = 1; attempt <= 20; attempt++) {
     try {
-      const res = await ttGet('/file/video/suggestcover/', { video_id, poster_number: 1 });
+      const res = await ttGet('/file/video/suggestcover/', { video_id, poster_number: 1 }, adv_id);
       const cover = res.data?.list?.[0];
       console.log(`suggestcover attempt ${attempt} for ${video_id}: code=${res.code} cover=${JSON.stringify(cover)}`);
       if (cover?.url) {
-        // Upload the frame URL to get an asset-library image_id required by Smart Plus ad create
         const uploadRes = await ttPost('/file/image/ad/upload/', {
           upload_type: 'UPLOAD_BY_URL',
           image_url: cover.url,
           image_name: `cover_${video_id}_${Date.now()}`,
-        });
+        }, adv_id);
         const image_id = uploadRes.data?.image_id;
         if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
         if (uploadRes.code === 40911) {
-          // Image already in library (content-hash dedup) — find it by dimensions
-          console.log(`Cover image duplicate (40911), searching library for existing image…`);
           const searchRes = await ttGet('/file/image/ad/search/', {
             filtering: JSON.stringify({ width: cover.width || 1080, height: cover.height || 1920 }),
             page_size: 1,
-          });
+          }, adv_id);
           const existing = searchRes.data?.list?.[0];
           if (existing?.image_id) { console.log(`Reusing existing cover image_id: ${existing.image_id}`); return existing.image_id; }
         }
@@ -500,17 +539,14 @@ async function getVideoCoverImageId(video_id) {
   return null;
 }
 
-async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises) {
-  // Await cover promises — started in parallel during video upload, should be ready by now
+async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises, adv_id) {
   const dedupedIds = [...new Set(video_ids)];
   const coverMap = {};
   for (const video_id of dedupedIds) {
-    const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id));
+    const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
     if (image_id) coverMap[video_id] = image_id;
   }
 
-  // Smart Plus: pass all video creatives + all headlines in one ad; TikTok rotates/optimizes
-  // image_info (cover) is required for every SINGLE_VIDEO creative
   const resolvedIdentityType = identity_type || 'BC_AUTH_TT';
   const creativeIdentity = {
     identity_type: resolvedIdentityType,
@@ -533,28 +569,23 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
-  // CTA portfolio IDs for BC_AUTH_TT + TikTok placement (call_to_action_list not supported)
+  // call_to_action_list not supported with BC_AUTH_TT + TikTok placement; use portfolio IDs
   const CTA_PORTFOLIO_IDS = {
     LEARN_MORE: '7654255502322404372',
     SHOP_NOW: '7654256510972791828',
   };
-  const call_to_action_id = CTA_PORTFOLIO_IDS[row.cta] || CTA_PORTFOLIO_IDS.LEARN_MORE;
+  const call_to_action_id = CTA_PORTFOLIO_IDS.LEARN_MORE;
 
-  // Smart Plus creative_list limit is 50; split if needed
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
-    const ad_configuration = {
-      ...creativeIdentity,
-      call_to_action_id,
-    };
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
-      ad_configuration,
+      ad_configuration: { ...creativeIdentity, call_to_action_id },
       ad_text_list,
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
-    });
+    }, adv_id);
     if (res.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(res)}`);
   }
 }
