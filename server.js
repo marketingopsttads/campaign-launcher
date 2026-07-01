@@ -544,7 +544,7 @@ async function deployRows(jobId, rows, accountsMap, identityMap) {
       }
 
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Uploading ${row.videos.length} video(s)…` });
-      const { ids: video_ids, coverPromises } = await uploadVideos(row.videos, adv_id);
+      const { ids: video_ids, coverPromises } = await uploadVideos(row.videos, adv_id, jobId, row.rowIndex);
 
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating ad group…' });
       const adgroup = await createAdGroup(row, campaign_id, adv_id, pixel_id);
@@ -606,21 +606,24 @@ async function findExistingVideo(baseName, adv_id) {
   return null;
 }
 
-async function uploadVideos(urls, adv_id) {
+async function uploadVideos(urls, adv_id, jobId, rowIndex) {
   const ids = [];
   const coverPromises = {};
-  const errors = [];
   const urlToId = {}; // cache URL→video_id within this upload batch
-  for (const url of urls) {
-    // If the same URL appears more than once in the sheet, reuse the first upload
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    const videoNum = i + 1;
+    // Same URL repeated in sheet — reuse without re-uploading
     if (urlToId[url]) {
       ids.push(urlToId[url]);
       continue;
     }
     try {
-      const baseName = url.split('/').pop().replace(/\.[^.]+$/, '').slice(0, 40);
+      // Use the TAIL of the filename so V1/V2/V3 suffixes are preserved and unique
+      const fullName = url.split('/').pop().replace(/\.[^.]+$/, '');
+      const tail = fullName.slice(-50); // take the end, not the start
       const rand = Math.random().toString(36).slice(2, 8);
-      const video_name = `${baseName}_${Date.now()}_${rand}`;
+      const video_name = `${tail}_${rand}`;
       const res = await ttPost('/file/video/ad/upload/', {
         upload_type: 'UPLOAD_BY_URL',
         video_url: url,
@@ -628,31 +631,37 @@ async function uploadVideos(urls, adv_id) {
         flaw_detect: true,
         auto_fix_enabled: true,
       }, adv_id);
-      // TikTok may return video_id even on success or duplicate responses
+      // Check for video_id in success response
       const video_id = res.data?.video_id || res.data?.[0]?.video_id;
       if (video_id) {
         ids.push(video_id);
         urlToId[url] = video_id;
         coverPromises[video_id] = getVideoCoverImageId(video_id, adv_id);
       } else if (res.code === 40911) {
-        // Duplicate: search by baseName — must be specific enough to avoid cross-matches
-        const existing_id = await findExistingVideo(baseName, adv_id);
-        if (existing_id) {
-          console.log(`Reusing existing video for ${url}: ${existing_id}`);
-          ids.push(existing_id);
-          urlToId[url] = existing_id;
-          coverPromises[existing_id] = getVideoCoverImageId(existing_id, adv_id);
+        // TikTok detected duplicate — check if it returned the existing ID directly
+        const dup_id = res.data?.video_id || res.data?.[0]?.video_id;
+        if (dup_id) {
+          ids.push(dup_id);
+          urlToId[url] = dup_id;
+          coverPromises[dup_id] = getVideoCoverImageId(dup_id, adv_id);
         } else {
-          errors.push(`Upload failed (duplicate) and could not find existing video for ${url}`);
+          // Can't recover — warn and skip this video
+          const warn = `Video ${videoNum} skipped (duplicate detected, ID not returned): ${url}`;
+          console.warn(warn);
+          if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `⚠ ${warn}` });
         }
       } else {
-        errors.push(`Upload failed for ${url}: code=${res.code} msg=${res.message}`);
+        const warn = `Video ${videoNum} failed (code=${res.code}): ${res.message}`;
+        console.warn(warn);
+        if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `⚠ ${warn}` });
       }
     } catch (e) {
-      errors.push(`Upload error for ${url}: ${e.message}`);
+      const warn = `Video ${videoNum} error: ${e.message}`;
+      console.warn(warn);
+      if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `⚠ ${warn}` });
     }
   }
-  if (!ids.length) throw new Error(errors.join(' | ') || 'No videos uploaded successfully');
+  if (!ids.length) throw new Error('No videos uploaded successfully');
   return { ids, coverPromises };
 }
 
@@ -727,12 +736,16 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
         const image_id = uploadRes.data?.image_id;
         if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
         if (uploadRes.code === 40911) {
+          // TikTok detected duplicate image — check if it returned the existing ID directly
+          const dup_image_id = uploadRes.data?.image_id;
+          if (dup_image_id) { console.log(`Reusing duplicate cover image_id for ${video_id}: ${dup_image_id}`); return dup_image_id; }
+          // Last resort: search by image URL hash to find this specific cover
           const searchRes = await ttGet('/file/image/ad/search/', {
-            filtering: JSON.stringify({ width: cover.width || 1080, height: cover.height || 1920 }),
-            page_size: 1,
+            filtering: JSON.stringify({ image_name: `cover_${video_id}` }),
+            page_size: 5,
           }, adv_id);
           const existing = searchRes.data?.list?.[0];
-          if (existing?.image_id) { console.log(`Reusing existing cover image_id: ${existing.image_id}`); return existing.image_id; }
+          if (existing?.image_id) { console.log(`Found cover by name for ${video_id}: ${existing.image_id}`); return existing.image_id; }
         }
         console.warn(`Cover upload failed: code=${uploadRes.code} msg=${uploadRes.message}`);
       }
