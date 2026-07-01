@@ -179,7 +179,7 @@
           <label>CSV File</label>
           <input type="file" id="csv-input" accept=".csv,.xlsx,.xls" />
         </div>
-        <button class="btn-upload" id="parse-btn">Preview CSV</button>
+        <button class="btn-upload" id="parse-btn">Validate Uploaded Campaign Data</button>
         <a href="/sample" class="btn-upload" style="text-decoration:none;">⬇ Download Template (.xlsx)</a>
       </div>
 
@@ -271,8 +271,9 @@
 
 <script>
 let parsedRows = [];
-let accounts = []; // [{ id, name }]
+let accounts = [];
 let deploying = false;
+const GEO_MAP_KEYS = new Set(['US','GB','UK','AU','CA','DE','FR','MX','BR','IN','JP','SG','PH','ID','TH','MY','VN','ZA','NG','KE','AE','SA','NZ','IT','ES','NL','SE','NO','DK','FI','PL','TR','AR','CO','CL','PE','EG','MA','GH','TZ','UA','RO','HU','CZ','GR','PT','BE','AT','CH','IL','KR','TW','HK','PK','BD']);
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -369,19 +370,34 @@ function getAccountsMap() {
   return map;
 }
 
-// ── Parse CSV ─────────────────────────────────────────────────────────────
+// ── Parse & Validate ──────────────────────────────────────────────────────
 document.getElementById('parse-btn').addEventListener('click', async () => {
   const file = document.getElementById('csv-input').files[0];
-  if (!file) return alert('Please select a CSV file first.');
+  if (!file) return alert('Please select a file first.');
   const fd = new FormData();
   fd.append('csv', file);
   const res = await fetch('/api/parse-csv', { method: 'POST', body: fd });
-  if (!res.ok) { alert('Failed to parse CSV: ' + (await res.json()).error); return; }
+  if (!res.ok) { alert('Failed to parse file: ' + (await res.json()).error); return; }
   const { rows } = await res.json();
   parsedRows = rows;
   renderTable(rows);
   document.getElementById('preview-section').style.display = 'block';
-  document.getElementById('row-count').textContent = `(${rows.length} campaign${rows.length !== 1 ? 's' : ''})`;
+
+  const invalidCount = rows.filter(r => r.validationErrors?.length).length;
+  const totalErrors = rows.reduce((n, r) => n + (r.validationErrors?.length || 0), 0);
+  if (invalidCount) {
+    document.getElementById('row-count').textContent =
+      `(${rows.length} campaign${rows.length !== 1 ? 's' : ''} — ⚠ ${invalidCount} row${invalidCount !== 1 ? 's' : ''} with ${totalErrors} error${totalErrors !== 1 ? 's' : ''})`;
+    document.getElementById('row-count').style.color = '#f87171';
+    document.getElementById('deploy-btn').disabled = true;
+    document.getElementById('deploy-btn').title = 'Fix validation errors before deploying';
+  } else {
+    document.getElementById('row-count').textContent =
+      `(${rows.length} campaign${rows.length !== 1 ? 's' : ''} — ✓ all rows valid)`;
+    document.getElementById('row-count').style.color = '#4ade80';
+    document.getElementById('deploy-btn').disabled = false;
+    document.getElementById('deploy-btn').title = '';
+  }
 });
 
 // ── Table rendering ───────────────────────────────────────────────────────
@@ -397,18 +413,26 @@ function rowHtml(r) {
     ? `<span class="pill pill-age35">35+</span>`
     : `<span class="pill pill-broad">Broad</span>`;
 
-  return `<tr id="row-${r.rowIndex}">
-    <td>${r.rowIndex + 1}</td>
-    <td style="font-size:0.75rem;color:#94a3b8">${esc(r.account_name || '—')}</td>
-    <td style="font-size:0.75rem;color:#94a3b8">${esc(r.identity_name || '—')}</td>
-    <td>${esc(r.campaign_name)}</td>
-    <td>${esc(r.geo)}</td>
-    <td>$${r.budget}</td>
+  const hasErrors = r.validationErrors?.length > 0;
+  const rowStyle = hasErrors ? 'outline: 1px solid #7f1d1d;' : '';
+  const errorsHtml = hasErrors
+    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${r.validationErrors.map(e =>
+        `<span style="font-size:0.68rem;color:#fca5a5;background:#450a0a;padding:2px 6px;border-radius:4px">⚠ ${esc(e)}</span>`
+      ).join('')}</div>`
+    : '';
+
+  return `<tr id="row-${r.rowIndex}" style="${rowStyle}">
+    <td>${r.rowIndex + 1}${errorsHtml}</td>
+    <td style="font-size:0.75rem;color:${hasErrors && !r.account_name ? '#f87171' : '#94a3b8'}">${esc(r.account_name || '—')}</td>
+    <td style="font-size:0.75rem;color:${hasErrors && !r.identity_name ? '#f87171' : '#94a3b8'}">${esc(r.identity_name || '—')}</td>
+    <td style="color:${hasErrors && !r.campaign_name ? '#f87171' : ''}">${esc(r.campaign_name || '—')}</td>
+    <td style="color:${hasErrors && !GEO_MAP_KEYS.has(r.geo) ? '#f87171' : ''}">${esc(r.geo || '—')}</td>
+    <td style="color:${hasErrors && !(r.budget > 0) ? '#f87171' : ''}">$${r.budget > 0 ? r.budget : '—'}</td>
     <td>${bidPill}</td>
     <td>${targetPill}</td>
-    <td style="white-space:nowrap">${esc(r.start_date)}<br><span style="color:#64748b;font-size:0.72rem">${esc(r.start_time)} UTC</span></td>
-    <td><div class="video-list">${r.videos.map((v, i) => `<a class="video-link" href="${esc(v)}" target="_blank">Video ${i+1}</a>`).join('')}</div></td>
-    <td><div class="headline-list">${r.headlines.map(h => `<span class="headline-item">${esc(h)}</span>`).join('')}</div></td>
+    <td style="white-space:nowrap;color:${hasErrors && !r.start_date ? '#f87171' : ''}">${esc(r.start_date || '—')}<br><span style="color:#64748b;font-size:0.72rem">${esc(r.start_time)} UTC</span></td>
+    <td><div class="video-list">${r.videos.length ? r.videos.map((v, i) => `<a class="video-link" href="${esc(v)}" target="_blank">Video ${i+1}</a>`).join('') : '<span style="color:#f87171;font-size:0.72rem">No videos</span>'}</div></td>
+    <td><div class="headline-list">${r.headlines.length ? r.headlines.map(h => `<span class="headline-item">${esc(h)}</span>`).join('') : '<span style="color:#f87171;font-size:0.72rem">No headlines</span>'}</div></td>
     <td id="status-${r.rowIndex}">${statusCell(r)}</td>
   </tr>`;
 }

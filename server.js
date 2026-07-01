@@ -354,21 +354,46 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
         const h = r[`headline_${n}`];
         if (h) headlines.push(h);
       }
+      const geo = (r.geo || '').toUpperCase();
+      const bid_strategy = (r.bid_strategy || '').toUpperCase();
+      const targeting = (r.targeting || '').toUpperCase();
+      const budget = parseFloat(r.budget);
+      const bid_amount = parseFloat(r.bid_amount) || null;
+
+      const validationErrors = [];
+      if (!r.account_name?.trim())          validationErrors.push('account_name is required');
+      if (!r.identity_name?.trim())         validationErrors.push('identity_name is required');
+      if (!r.campaign_name?.trim())         validationErrors.push('campaign_name is required');
+      if (!geo)                             validationErrors.push('geo is required');
+      else if (!GEO_MAP[geo])               validationErrors.push(`geo "${geo}" is not a supported country code`);
+      if (isNaN(budget) || budget <= 0)     validationErrors.push('budget must be a positive number');
+      if (!bid_strategy)                    validationErrors.push('bid_strategy is required');
+      else if (!['LOWEST_COST','COST_CAP'].includes(bid_strategy)) validationErrors.push('bid_strategy must be LOWEST_COST or COST_CAP');
+      if (bid_strategy === 'COST_CAP' && !bid_amount) validationErrors.push('bid_amount is required when bid_strategy is COST_CAP');
+      if (!targeting)                       validationErrors.push('targeting is required');
+      else if (!['BROAD','AGE_35_PLUS'].includes(targeting)) validationErrors.push('targeting must be BROAD or AGE_35_PLUS');
+      if (!r.start_date?.trim())            validationErrors.push('start_date is required');
+      if (!videos.length)                   validationErrors.push('at least one video_url is required');
+      if (!headlines.length)                validationErrors.push('at least one headline is required');
+      if (!r.url?.trim())                   validationErrors.push('landing page url is required');
+      else if (!/^https?:\/\/.+/.test(r.url.trim())) validationErrors.push('url must start with http:// or https://');
+
       return {
         rowIndex: i,
         account_name: r.account_name || '',
         identity_name: r.identity_name || '',
         campaign_name: r.campaign_name,
-        geo: (r.geo || '').toUpperCase(),
-        budget: parseFloat(r.budget),
-        bid_strategy: (r.bid_strategy || 'LOWEST_COST').toUpperCase(),
-        bid_amount: parseFloat(r.bid_amount) || null,
-        targeting: (r.targeting || 'BROAD').toUpperCase(),
+        geo,
+        budget,
+        bid_strategy,
+        bid_amount,
+        targeting,
         start_date: r.start_date,
         start_time: r.start_time || '00:00',
         videos,
         headlines,
         url: r.url,
+        validationErrors,
         status: 'pending',
         error: null,
         campaign_id: null,
