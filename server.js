@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const ExcelJS = require('exceljs');
+const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 app.use(express.json());
@@ -124,20 +125,48 @@ function requireAuth(req, res, next) {
   res.status(401).json({ error: 'Unauthorized' });
 }
 
-// ── Persistent log store ───────────────────────────────────────────────────
-const LOG_PATH = process.env.LOG_PATH || path.join(__dirname, 'campaign-logs.json');
+// ── Persistent log store (Cloudflare R2) ──────────────────────────────────
+const R2_BUCKET = process.env.R2_BUCKET_NAME;
+const LOG_KEY   = 'campaign-logs.json';
 
-function loadLogs() {
-  try {
-    if (fs.existsSync(LOG_PATH)) return JSON.parse(fs.readFileSync(LOG_PATH, 'utf8'));
-  } catch (_) {}
+const r2 = R2_BUCKET ? new S3Client({
+  region: 'auto',
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId:     process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+}) : null;
+
+async function loadLogs() {
+  if (r2) {
+    try {
+      const res = await r2.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: LOG_KEY }));
+      const body = await res.Body.transformToString();
+      return JSON.parse(body);
+    } catch (e) {
+      if (e.name !== 'NoSuchKey') console.error('R2 loadLogs error:', e.message);
+      return [];
+    }
+  }
+  // Fallback: local file
+  const LOCAL = process.env.LOG_PATH || path.join(__dirname, 'campaign-logs.json');
+  try { if (fs.existsSync(LOCAL)) return JSON.parse(fs.readFileSync(LOCAL, 'utf8')); } catch (_) {}
   return [];
 }
 
-function appendLog(entry) {
-  const logs = loadLogs();
+async function appendLog(entry) {
+  const logs = await loadLogs();
   logs.push(entry);
-  try { fs.writeFileSync(LOG_PATH, JSON.stringify(logs, null, 2)); } catch (e) { console.error('Failed to write log:', e.message); }
+  const body = JSON.stringify(logs, null, 2);
+  if (r2) {
+    try {
+      await r2.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: LOG_KEY, Body: body, ContentType: 'application/json' }));
+    } catch (e) { console.error('R2 appendLog error:', e.message); }
+  } else {
+    const LOCAL = process.env.LOG_PATH || path.join(__dirname, 'campaign-logs.json');
+    try { fs.writeFileSync(LOCAL, body); } catch (e) { console.error('Failed to write log:', e.message); }
+  }
 }
 
 // ── In-memory stores ───────────────────────────────────────────────────────
@@ -212,8 +241,12 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/logs', requireAuth, (req, res) => {
-  res.json(loadLogs().reverse());
+app.get('/api/logs', requireAuth, async (req, res) => {
+  try {
+    res.json((await loadLogs()).reverse());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/sample', requireAuth, async (req, res) => {
@@ -581,7 +614,7 @@ async function deployRows(jobId, rows, accountsMap, identityMap, deployedBy = 'u
       jobEmit(jobId, { type: 'row_error', rowIndex: row.rowIndex, error: err.message });
     }
 
-    appendLog(logEntry);
+    await appendLog(logEntry);
   }
 
   jobEmit(jobId, { type: 'done' });
