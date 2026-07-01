@@ -77,17 +77,6 @@
     }
     .btn-upload:hover { background: #1e40af; }
 
-    /* ── Accounts hint ── */
-    #accounts-hint {
-      background: #131320; border: 1px solid #2d2d3f; border-radius: 8px;
-      padding: 10px 14px; margin-bottom: 20px; font-size: 0.78rem; color: #64748b; display: none;
-    }
-    #accounts-hint strong { color: #94a3b8; display: block; margin-bottom: 6px; }
-    #accounts-hint .acct-list { display: flex; flex-wrap: wrap; gap: 6px; }
-    #accounts-hint .acct-chip {
-      background: #1e1e2e; border: 1px solid #2d2d3f; border-radius: 4px;
-      padding: 2px 8px; font-size: 0.72rem; color: #94a3b8; font-family: monospace;
-    }
 
     /* ── Preview table ── */
     #preview-section { display: none; }
@@ -187,23 +176,11 @@
     <div class="tab-panel active" id="tab-deploy">
       <div class="controls">
         <div class="control-group">
-          <label>TikTok Identity</label>
-          <select id="identity-select">
-            <option value="">Loading identities…</option>
-          </select>
-        </div>
-        <div class="control-group">
           <label>CSV File</label>
           <input type="file" id="csv-input" accept=".csv" />
         </div>
         <button class="btn-upload" id="parse-btn">Preview CSV</button>
         <a href="/sample" class="btn-upload" style="text-decoration:none;">⬇ Download Template</a>
-      </div>
-
-      <!-- Accounts reference hint -->
-      <div id="accounts-hint">
-        <strong>Available account names for CSV</strong>
-        <div class="acct-list" id="acct-chip-list"></div>
       </div>
 
       <div id="identity-error" style="background:#1c0f0f;border:1px solid #450a0a;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:none;">
@@ -241,6 +218,7 @@
               <tr>
                 <th>#</th>
                 <th>Account</th>
+                <th>Identity</th>
                 <th>Campaign Name</th>
                 <th>Geo</th>
                 <th>Budget/day</th>
@@ -293,7 +271,6 @@
 
 <script>
 let parsedRows = [];
-let identities = [];
 let accounts = []; // [{ id, name }]
 let deploying = false;
 
@@ -344,7 +321,6 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
 function showDashboard() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
-  loadIdentities();
   loadAccounts();
 }
 
@@ -362,7 +338,6 @@ async function submitAuthCode() {
   if (data.ok) {
     document.getElementById('identity-error').style.display = 'none';
     document.getElementById('auth-code-input').value = '';
-    loadIdentities();
     loadAccounts();
   } else {
     errEl.textContent = data.error || 'Exchange failed';
@@ -370,42 +345,6 @@ async function submitAuthCode() {
   }
 }
 
-// ── Identities ────────────────────────────────────────────────────────────
-async function loadIdentities() {
-  const sel = document.getElementById('identity-select');
-  const errEl = document.getElementById('identity-error');
-  sel.innerHTML = '<option value="">Loading…</option>';
-  errEl.style.display = 'none';
-  try {
-    const res = await fetch('/api/identities');
-    const data = await res.json();
-    if (!res.ok) {
-      sel.innerHTML = '<option value="">Failed to load</option>';
-      document.getElementById('identity-error-text').textContent = '⚠ ' + (data.error || 'Could not load identities');
-      errEl.style.display = 'block';
-      return;
-    }
-    identities = data;
-    if (!identities.length) { sel.innerHTML = '<option value="">No identities found</option>'; return; }
-    sel.innerHTML = identities.map(i =>
-      `<option value="${i.id}" data-type="${i.type}" data-bc="${i.bc_id || ''}">${i.name}</option>`
-    ).join('');
-  } catch (e) {
-    sel.innerHTML = '<option value="">Failed to load</option>';
-    document.getElementById('identity-error-text').textContent = '⚠ Network error loading identities';
-    errEl.style.display = 'block';
-  }
-}
-
-function getSelectedIdentity() {
-  const sel = document.getElementById('identity-select');
-  const opt = sel.selectedOptions[0];
-  return {
-    identity_id: sel.value,
-    identity_type: opt?.dataset.type || 'BC_AUTH_TT',
-    identity_bc_id: opt?.dataset.bc || '',
-  };
-}
 
 // ── Accounts ──────────────────────────────────────────────────────────────
 async function loadAccounts() {
@@ -461,6 +400,7 @@ function rowHtml(r) {
   return `<tr id="row-${r.rowIndex}">
     <td>${r.rowIndex + 1}</td>
     <td style="font-size:0.75rem;color:#94a3b8">${esc(r.account_name || '—')}</td>
+    <td style="font-size:0.75rem;color:#94a3b8">${esc(r.identity_name || '—')}</td>
     <td>${esc(r.campaign_name)}</td>
     <td>${esc(r.geo)}</td>
     <td>$${r.budget}</td>
@@ -497,8 +437,6 @@ function esc(s) {
 document.getElementById('deploy-btn').addEventListener('click', async () => {
   if (deploying) return;
   if (!parsedRows.length) return;
-  const { identity_id, identity_type, identity_bc_id } = getSelectedIdentity();
-  if (!identity_id) return alert('Please select an identity.');
   if (!confirm(`Deploy ${parsedRows.length} campaign(s) to TikTok?`)) return;
 
   deploying = true;
@@ -510,7 +448,7 @@ document.getElementById('deploy-btn').addEventListener('click', async () => {
 
   const res = await fetch('/api/deploy', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows: parsedRows, identity_id, identity_type, identity_bc_id, accountsMap }),
+    body: JSON.stringify({ rows: parsedRows, accountsMap }),
   });
   const { jobId } = await res.json();
 

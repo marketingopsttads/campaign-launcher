@@ -202,7 +202,7 @@ app.get('/api/logs', requireAuth, (req, res) => {
 
 app.get('/sample', (req, res) => {
   const headers = [
-    'account_name','campaign_name','geo','budget','bid_strategy','bid_amount','targeting',
+    'account_name','identity_name','campaign_name','geo','budget','bid_strategy','bid_amount','targeting',
     'start_date','start_time',
     'video_url_1','video_url_2','video_url_3','video_url_4','video_url_5',
     'video_url_6','video_url_7','video_url_8','video_url_9','video_url_10',
@@ -211,7 +211,8 @@ app.get('/sample', (req, res) => {
   ];
   const rows = [
     {
-      account_name: 'My Account Name', campaign_name: 'BOZV_Jul30', geo: 'US', budget: 30,
+      account_name: 'My Account Name', identity_name: 'My TikTok Identity',
+      campaign_name: 'BOZV_Jul30', geo: 'US', budget: 30,
       bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
       start_date: '10/07/2026', start_time: '00:00',
       video_url_1: 'https://videosapi.net/videos/example1.mp4',
@@ -224,7 +225,8 @@ app.get('/sample', (req, res) => {
       url: 'https://yoursite.com/landing',
     },
     {
-      account_name: 'My Account Name', campaign_name: 'MT_Jul30', geo: 'US', budget: 50,
+      account_name: 'My Account Name', identity_name: 'My TikTok Identity',
+      campaign_name: 'MT_Jul30', geo: 'US', budget: 50,
       bid_strategy: 'COST_CAP', bid_amount: 15, targeting: 'AGE_35_PLUS',
       start_date: '10/07/2026', start_time: '08:00',
       video_url_1: 'https://videosapi.net/videos/example3.mp4',
@@ -266,6 +268,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
       return {
         rowIndex: i,
         account_name: r.account_name || '',
+        identity_name: r.identity_name || '',
         campaign_name: r.campaign_name,
         geo: (r.geo || '').toUpperCase(),
         budget: parseFloat(r.budget),
@@ -290,14 +293,27 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
 });
 
 app.post('/api/deploy', requireAuth, async (req, res) => {
-  const { rows, identity_id, identity_type, identity_bc_id, accountsMap } = req.body;
+  const { rows, accountsMap } = req.body;
   if (!rows?.length) return res.status(400).json({ error: 'No rows' });
+
+  // Build identity map: name -> { id, type, bc_id }
+  let identityMap = {};
+  try {
+    const data = await ttGet('/identity/get/');
+    (data.data?.identity_list || []).forEach(i => {
+      identityMap[i.display_name] = {
+        id: i.identity_id,
+        type: i.identity_type,
+        bc_id: i.identity_authorized_bc_id,
+      };
+    });
+  } catch (_) {}
 
   const jobId = uuidv4();
   jobs.set(jobId, { events: [], clients: new Set(), status: 'running' });
   res.json({ jobId });
 
-  deployRows(jobId, rows, identity_id, identity_type, identity_bc_id, accountsMap || {}).catch(console.error);
+  deployRows(jobId, rows, accountsMap || {}, identityMap).catch(console.error);
 });
 
 app.get('/api/deploy/:jobId/events', requireAuth, (req, res) => {
@@ -330,10 +346,16 @@ async function getPixelForAccount(adv_id) {
 }
 
 // ── Deployment logic ───────────────────────────────────────────────────────
-async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_id, accountsMap) {
+async function deployRows(jobId, rows, accountsMap, identityMap) {
   for (const row of rows) {
     const adv_id = accountsMap[row.account_name] || ADV_ID;
     const account_name = row.account_name || 'Default';
+
+    // Resolve identity from row's identity_name field
+    const resolvedIdentity = identityMap[row.identity_name] || Object.values(identityMap)[0] || {};
+    const identity_id = resolvedIdentity.id;
+    const identity_type = resolvedIdentity.type || 'BC_AUTH_TT';
+    const identity_bc_id = resolvedIdentity.bc_id || BC_ID;
 
     jobEmit(jobId, { type: 'row_start', rowIndex: row.rowIndex, campaign_name: row.campaign_name });
 
