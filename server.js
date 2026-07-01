@@ -350,18 +350,24 @@ async function createCampaign(row) {
 }
 
 async function findExistingVideo(baseName) {
-  try {
-    // Strip leading numeric timestamp prefix (e.g. "1782895816049_") to get a searchable keyword
-    const keyword = baseName.replace(/^\d+_/, '').replace(/_/g, ' ').slice(0, 40);
-    const res = await ttGet('/file/video/ad/search/', { keyword });
-    const list = res.data?.list || [];
-    // Match if the stored file_name contains our baseName (which was used as prefix when uploading)
-    const baseCore = baseName.replace(/^\d+_/, '').toLowerCase();
-    const match = list.find(v => v.file_name && v.file_name.toLowerCase().replace(/_/g, ' ').includes(baseCore.replace(/_/g, ' ').slice(0, 20)));
-    return match?.video_id || null;
-  } catch (e) {
-    return null;
+  // Strip leading numeric prefix and normalize for matching
+  const baseCore = baseName.replace(/^\d+_/, '').replace(/[_\s-]+/g, ' ').toLowerCase().slice(0, 25);
+  for (let page = 1; page <= 15; page++) {
+    try {
+      const res = await ttGet('/file/video/ad/search/', { page, page_size: 20 });
+      const list = res.data?.list || [];
+      const match = list.find(v => {
+        if (!v.file_name) return false;
+        return v.file_name.replace(/[_\s-]+/g, ' ').toLowerCase().includes(baseCore);
+      });
+      if (match) return match.video_id;
+      const total = res.data?.page_info?.total_number || 0;
+      if (page * 20 >= total) break;
+    } catch (e) {
+      break;
+    }
   }
+  return null;
 }
 
 async function uploadVideos(urls) {
