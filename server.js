@@ -5,6 +5,7 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const XLSX = require('xlsx');
 
 const app = express();
 app.use(express.json());
@@ -107,6 +108,7 @@ app.get('/api/me', (req, res) => {
 app.get('/api/identities', requireAuth, async (req, res) => {
   try {
     const data = await ttGet('/identity/get/');
+    if (data.code !== 0) return res.status(502).json({ error: `TikTok API error ${data.code}: ${data.message}` });
     const list = (data.data?.identity_list || []).map(i => ({
       id: i.identity_id,
       name: i.display_name,
@@ -118,6 +120,51 @@ app.get('/api/identities', requireAuth, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get('/sample', (req, res) => {
+  const headers = [
+    'campaign_name','geo','budget','bid_strategy','bid_amount','targeting',
+    'start_date','start_time',
+    'video_url_1','video_url_2','video_url_3','video_url_4','video_url_5',
+    'video_url_6','video_url_7','video_url_8','video_url_9','video_url_10',
+    'headline_1','headline_2','headline_3','headline_4','headline_5',
+    'cta','url',
+  ];
+  const example = {
+    campaign_name: 'BOZV_Jul30', geo: 'US', budget: 30,
+    bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
+    start_date: '2026-07-10', start_time: '00:00',
+    video_url_1: 'https://videosapi.net/videos/example1.mp4',
+    video_url_2: 'https://videosapi.net/videos/example2.mp4',
+    video_url_3: '', video_url_4: '', video_url_5: '',
+    video_url_6: '', video_url_7: '', video_url_8: '',
+    video_url_9: '', video_url_10: '',
+    headline_1: 'Lose weight fast', headline_2: 'Try it free today',
+    headline_3: 'Results in 7 days', headline_4: '', headline_5: '',
+    cta: 'LEARN_MORE', url: 'https://yoursite.com/landing',
+  };
+  const example2 = {
+    campaign_name: 'MT_Jul30', geo: 'US', budget: 50,
+    bid_strategy: 'COST_CAP', bid_amount: 15, targeting: 'AGE_35_PLUS',
+    start_date: '2026-07-10', start_time: '08:00',
+    video_url_1: 'https://videosapi.net/videos/example3.mp4',
+    video_url_2: '', video_url_3: '', video_url_4: '', video_url_5: '',
+    video_url_6: '', video_url_7: '', video_url_8: '',
+    video_url_9: '', video_url_10: '',
+    headline_1: 'Save more today', headline_2: 'Start saving now',
+    headline_3: '', headline_4: '', headline_5: '',
+    cta: 'SHOP_NOW', url: 'https://yoursite.com/offer',
+  };
+
+  const ws = XLSX.utils.json_to_sheet([example, example2], { header: headers });
+  ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length, 20) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Campaigns');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Disposition', 'attachment; filename="campaign-template.xlsx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(buf);
 });
 
 app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {

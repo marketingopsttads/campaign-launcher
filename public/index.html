@@ -158,7 +158,9 @@
         <input type="file" id="csv-input" accept=".csv" />
       </div>
       <button class="btn-upload" id="parse-btn">Preview CSV</button>
+      <a href="/sample" class="btn-upload" style="text-decoration:none;">⬇ Download Template</a>
     </div>
+    <div id="identity-error" style="color:#f87171;font-size:0.8rem;margin-bottom:16px;display:none;"></div>
 
     <!-- Progress bar -->
     <div id="progress-bar-wrap">
@@ -245,15 +247,30 @@ function showDashboard() {
 // ── Identities ────────────────────────────────────────────────────────────
 async function loadIdentities() {
   const sel = document.getElementById('identity-select');
+  const errEl = document.getElementById('identity-error');
   sel.innerHTML = '<option value="">Loading…</option>';
+  errEl.style.display = 'none';
   try {
     const res = await fetch('/api/identities');
-    identities = await res.json();
+    const data = await res.json();
+    if (!res.ok) {
+      sel.innerHTML = '<option value="">Failed to load</option>';
+      errEl.textContent = '⚠ ' + (data.error || 'Could not load identities');
+      errEl.style.display = 'block';
+      return;
+    }
+    identities = data;
+    if (!identities.length) {
+      sel.innerHTML = '<option value="">No identities found</option>';
+      return;
+    }
     sel.innerHTML = identities.map(i =>
       `<option value="${i.id}" data-type="${i.type}" data-bc="${i.bc_id || ''}">${i.name}</option>`
     ).join('');
   } catch (e) {
-    sel.innerHTML = '<option value="">Failed to load identities</option>';
+    sel.innerHTML = '<option value="">Failed to load</option>';
+    errEl.textContent = '⚠ Network error loading identities';
+    errEl.style.display = 'block';
   }
 }
 
