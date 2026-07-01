@@ -376,12 +376,20 @@ async function createAdGroup(row, campaign_id) {
   const location_id = GEO_MAP[row.geo];
   if (!location_id) throw new Error(`Unknown geo: ${row.geo}`);
 
-  // Parse time robustly: handles "8:00", "08:00", "8:00 AM", blank -> "00:00"
+  // Parse date: handles YYYY-MM-DD or DD/MM/YYYY or MM/DD/YYYY -> YYYY-MM-DD
+  const rawDate = (row.start_date || '').toString().trim();
+  let datePart = rawDate;
+  const slashMatch = rawDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    // Treat as DD/MM/YYYY (Excel default in many locales)
+    datePart = `${slashMatch[3]}-${slashMatch[2].padStart(2,'0')}-${slashMatch[1].padStart(2,'0')}`;
+  }
+  // Parse time: handles "8:00", "08:00", blank -> "00:00"
   const rawTime = (row.start_time || '').toString().trim();
   let hh = '00', mm = '00';
   const timeMatch = rawTime.match(/(\d{1,2}):(\d{2})/);
   if (timeMatch) { hh = timeMatch[1].padStart(2,'0'); mm = timeMatch[2]; }
-  const schedule_start = `${row.start_date} ${hh}:${mm}:00`;
+  const schedule_start = `${datePart} ${hh}:${mm}:00`;
 
   const body = {
     campaign_id,
