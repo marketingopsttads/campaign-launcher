@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campaign Launcher</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f13; color: #e2e8f0; min-height: 100vh; }
+
+    /* ── Login ── */
+    #login-screen {
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .login-box {
+      background: #1e1e2e; border: 1px solid #2d2d3f; border-radius: 14px;
+      padding: 40px 36px; width: 360px;
+    }
+    .login-box h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 6px; }
+    .login-box p { color: #64748b; font-size: 0.85rem; margin-bottom: 28px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px; }
+    .field input {
+      width: 100%; background: #0f0f13; border: 1px solid #2d2d3f; border-radius: 8px;
+      padding: 10px 12px; color: #e2e8f0; font-size: 0.9rem; outline: none;
+    }
+    .field input:focus { border-color: #6366f1; }
+    .btn-primary {
+      width: 100%; background: #6366f1; color: #fff; border: none; border-radius: 8px;
+      padding: 11px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background 0.15s;
+    }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error-msg { color: #f87171; font-size: 0.8rem; margin-top: 12px; text-align: center; }
+
+    /* ── Dashboard ── */
+    #dashboard { display: none; }
+    header {
+      background: #1e1e2e; border-bottom: 1px solid #2d2d3f;
+      padding: 14px 32px; display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { font-size: 1rem; font-weight: 600; }
+    .btn-ghost {
+      background: none; border: 1px solid #2d2d3f; color: #94a3b8; border-radius: 6px;
+      padding: 6px 14px; font-size: 0.8rem; cursor: pointer; transition: all 0.15s;
+    }
+    .btn-ghost:hover { border-color: #475569; color: #e2e8f0; }
+
+    main { padding: 32px; max-width: 1100px; margin: 0 auto; }
+
+    /* ── Controls bar ── */
+    .controls {
+      display: flex; gap: 16px; align-items: flex-end; margin-bottom: 28px; flex-wrap: wrap;
+    }
+    .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .control-group label { font-size: 0.78rem; color: #94a3b8; }
+    .control-group select, .control-group input[type=file] {
+      background: #1e1e2e; border: 1px solid #2d2d3f; border-radius: 8px;
+      padding: 9px 12px; color: #e2e8f0; font-size: 0.85rem; cursor: pointer; outline: none;
+    }
+    .control-group select { min-width: 220px; }
+    .identity-avatar { width: 20px; height: 20px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+    .btn-upload {
+      background: #1e3a5f; color: #60a5fa; border: none; border-radius: 8px;
+      padding: 9px 16px; font-size: 0.85rem; cursor: pointer; transition: background 0.15s; white-space: nowrap;
+    }
+    .btn-upload:hover { background: #1e40af; }
+
+    /* ── Preview table ── */
+    #preview-section { display: none; }
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+    }
+    .section-header h2 { font-size: 1rem; font-weight: 600; }
+    .btn-deploy {
+      background: #16a34a; color: #fff; border: none; border-radius: 8px;
+      padding: 9px 20px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: background 0.15s;
+    }
+    .btn-deploy:hover { background: #15803d; }
+    .btn-deploy:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; min-width: 900px; }
+    thead th {
+      background: #1e1e2e; border: 1px solid #2d2d3f; padding: 10px 12px;
+      text-align: left; color: #94a3b8; font-weight: 500; white-space: nowrap;
+    }
+    tbody td {
+      border: 1px solid #2d2d3f; padding: 10px 12px; vertical-align: top;
+      background: #14141e;
+    }
+    tbody tr:hover td { background: #1a1a28; }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.72rem; font-weight: 500;
+    }
+    .pill-broad { background: #1e3a5f; color: #60a5fa; }
+    .pill-age35 { background: #3b1f5e; color: #c084fc; }
+    .pill-lowest { background: #14532d; color: #4ade80; }
+    .pill-costcap { background: #451a03; color: #fb923c; }
+    .pill-pending { background: #1e1e2e; color: #64748b; }
+    .pill-running { background: #1e3a5f; color: #60a5fa; }
+    .pill-done { background: #14532d; color: #4ade80; }
+    .pill-error { background: #450a0a; color: #f87171; }
+    .video-list { display: flex; flex-direction: column; gap: 2px; }
+    .video-link { color: #6366f1; text-decoration: none; font-size: 0.72rem; }
+    .video-link:hover { text-decoration: underline; }
+    .headline-list { display: flex; flex-direction: column; gap: 2px; }
+    .headline-item { color: #94a3b8; font-size: 0.72rem; }
+    .status-step { color: #64748b; font-size: 0.72rem; margin-top: 4px; }
+    .campaign-link { color: #4ade80; font-size: 0.72rem; text-decoration: none; }
+    .campaign-link:hover { text-decoration: underline; }
+
+    /* ── Deploy progress bar ── */
+    #progress-bar-wrap { display: none; margin-bottom: 20px; }
+    .progress-label { font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px; display: flex; justify-content: space-between; }
+    .progress-track { height: 6px; background: #2d2d3f; border-radius: 9999px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #6366f1; border-radius: 9999px; width: 0%; transition: width 0.3s; }
+  </style>
+</head>
+<body>
+
+<!-- ── LOGIN ── -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>Campaign Launcher</h1>
+    <p>Sign in to continue</p>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="login-user" autocomplete="username" />
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="login-pass" autocomplete="current-password" />
+    </div>
+    <button class="btn-primary" id="login-btn">Sign in</button>
+    <div class="error-msg" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ── DASHBOARD ── -->
+<div id="dashboard">
+  <header>
+    <h1>Campaign Launcher</h1>
+    <button class="btn-ghost" id="logout-btn">Sign out</button>
+  </header>
+
+  <main>
+    <!-- Controls -->
+    <div class="controls">
+      <div class="control-group">
+        <label>TikTok Identity</label>
+        <select id="identity-select">
+          <option value="">Loading identities…</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>CSV File</label>
+        <input type="file" id="csv-input" accept=".csv" />
+      </div>
+      <button class="btn-upload" id="parse-btn">Preview CSV</button>
+    </div>
+
+    <!-- Progress bar -->
+    <div id="progress-bar-wrap">
+      <div class="progress-label">
+        <span id="progress-label-text">Deploying…</span>
+        <span id="progress-label-pct">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+    </div>
+
+    <!-- Preview table -->
+    <div id="preview-section">
+      <div class="section-header">
+        <h2>Campaign Preview <span id="row-count" style="color:#64748b;font-weight:400;font-size:0.85rem;"></span></h2>
+        <button class="btn-deploy" id="deploy-btn">Deploy All Campaigns</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Campaign Name</th>
+              <th>Geo</th>
+              <th>Budget/day</th>
+              <th>Bid</th>
+              <th>Targeting</th>
+              <th>Schedule</th>
+              <th>Videos</th>
+              <th>Headlines</th>
+              <th>CTA</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="preview-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+let parsedRows = [];
+let identities = [];
+let deploying = false;
+
+// ── Auth ──────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  const res = await fetch('/api/me');
+  const { user } = await res.json();
+  if (user) showDashboard();
+}
+
+document.getElementById('login-btn').addEventListener('click', async () => {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  const res = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: user, password: pass }),
+  });
+  if (res.ok) { showDashboard(); }
+  else { document.getElementById('login-error').textContent = 'Invalid username or password'; btn.disabled = false; }
+});
+
+document.getElementById('login-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('login-btn').click();
+});
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await fetch('/api/logout', { method: 'POST' });
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-user').value = '';
+  document.getElementById('login-pass').value = '';
+});
+
+function showDashboard() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  loadIdentities();
+}
+
+// ── Identities ────────────────────────────────────────────────────────────
+async function loadIdentities() {
+  const sel = document.getElementById('identity-select');
+  sel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const res = await fetch('/api/identities');
+    identities = await res.json();
+    sel.innerHTML = identities.map(i =>
+      `<option value="${i.id}" data-type="${i.type}" data-bc="${i.bc_id || ''}">${i.name}</option>`
+    ).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Failed to load identities</option>';
+  }
+}
+
+function getSelectedIdentity() {
+  const sel = document.getElementById('identity-select');
+  const opt = sel.selectedOptions[0];
+  return {
+    identity_id: sel.value,
+    identity_type: opt?.dataset.type || 'BC_AUTH_TT',
+    identity_bc_id: opt?.dataset.bc || '',
+  };
+}
+
+// ── Parse CSV ─────────────────────────────────────────────────────────────
+document.getElementById('parse-btn').addEventListener('click', async () => {
+  const file = document.getElementById('csv-input').files[0];
+  if (!file) return alert('Please select a CSV file first.');
+  const fd = new FormData();
+  fd.append('csv', file);
+  const res = await fetch('/api/parse-csv', { method: 'POST', body: fd });
+  if (!res.ok) { alert('Failed to parse CSV: ' + (await res.json()).error); return; }
+  const { rows } = await res.json();
+  parsedRows = rows;
+  renderTable(rows);
+  document.getElementById('preview-section').style.display = 'block';
+  document.getElementById('row-count').textContent = `(${rows.length} campaigns)`;
+});
+
+// ── Table rendering ───────────────────────────────────────────────────────
+function renderTable(rows) {
+  const tbody = document.getElementById('preview-body');
+  tbody.innerHTML = rows.map(r => rowHtml(r)).join('');
+}
+
+function rowHtml(r) {
+  const bidPill = r.bid_strategy === 'COST_CAP'
+    ? `<span class="pill pill-costcap">Cost Cap${r.bid_amount ? ' $' + r.bid_amount : ''}</span>`
+    : `<span class="pill pill-lowest">Lowest Cost</span>`;
+  const targetPill = r.targeting === 'AGE_35_PLUS'
+    ? `<span class="pill pill-age35">35+</span>`
+    : `<span class="pill pill-broad">Broad</span>`;
+  const statusHtml = statusCell(r);
+
+  return `<tr id="row-${r.rowIndex}">
+    <td>${r.rowIndex + 1}</td>
+    <td>${esc(r.campaign_name)}</td>
+    <td>${esc(r.geo)}</td>
+    <td>$${r.budget}</td>
+    <td>${bidPill}</td>
+    <td>${targetPill}</td>
+    <td style="white-space:nowrap">${esc(r.start_date)}<br><span style="color:#64748b;font-size:0.72rem">${esc(r.start_time)} UTC</span></td>
+    <td><div class="video-list">${r.videos.map((v, i) => `<a class="video-link" href="${esc(v)}" target="_blank">Video ${i+1}</a>`).join('')}</div></td>
+    <td><div class="headline-list">${r.headlines.map(h => `<span class="headline-item">${esc(h)}</span>`).join('')}</div></td>
+    <td>${esc(r.cta)}</td>
+    <td id="status-${r.rowIndex}">${statusHtml}</td>
+  </tr>`;
+}
+
+function statusCell(r) {
+  if (r.status === 'pending') return `<span class="pill pill-pending">Pending</span>`;
+  if (r.status === 'running') return `<span class="pill pill-running">Running…</span><div class="status-step" id="step-${r.rowIndex}">${esc(r.step||'')}</div>`;
+  if (r.status === 'done') return `<span class="pill pill-done">Done</span>${r.campaign_id ? `<br><a class="campaign-link" href="https://ads.tiktok.com/i18n/perf/campaign?aadvid=${r.campaign_id}" target="_blank">${r.campaign_id}</a>` : ''}`;
+  if (r.status === 'error') return `<span class="pill pill-error">Error</span><div class="status-step" style="color:#f87171">${esc(r.error||'')}</div>`;
+  return '';
+}
+
+function updateRowStatus(rowIndex, updates) {
+  const row = parsedRows.find(r => r.rowIndex === rowIndex);
+  if (!row) return;
+  Object.assign(row, updates);
+  const cell = document.getElementById(`status-${rowIndex}`);
+  if (cell) cell.innerHTML = statusCell(row);
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Deploy ────────────────────────────────────────────────────────────────
+document.getElementById('deploy-btn').addEventListener('click', async () => {
+  if (deploying) return;
+  if (!parsedRows.length) return;
+  const { identity_id, identity_type, identity_bc_id } = getSelectedIdentity();
+  if (!identity_id) return alert('Please select an identity.');
+  if (!confirm(`Deploy ${parsedRows.length} campaign(s) to TikTok?`)) return;
+
+  deploying = true;
+  document.getElementById('deploy-btn').disabled = true;
+  document.getElementById('parse-btn').disabled = true;
+  document.getElementById('progress-bar-wrap').style.display = 'block';
+
+  const res = await fetch('/api/deploy', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows: parsedRows, identity_id, identity_type, identity_bc_id }),
+  });
+  const { jobId } = await res.json();
+
+  let done = 0;
+  const total = parsedRows.length;
+
+  const evtSource = new EventSource(`/api/deploy/${jobId}/events`);
+  evtSource.onmessage = e => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'row_start') {
+      updateRowStatus(ev.rowIndex, { status: 'running', step: 'Starting…' });
+    } else if (ev.type === 'step') {
+      const row = parsedRows.find(r => r.rowIndex === ev.rowIndex);
+      if (row) { row.step = ev.step; }
+      const stepEl = document.getElementById(`step-${ev.rowIndex}`);
+      if (stepEl) stepEl.textContent = ev.step;
+    } else if (ev.type === 'row_done') {
+      done++;
+      updateRowStatus(ev.rowIndex, { status: 'done', campaign_id: ev.campaign_id });
+      setProgress(done, total);
+    } else if (ev.type === 'row_error') {
+      done++;
+      updateRowStatus(ev.rowIndex, { status: 'error', error: ev.error });
+      setProgress(done, total);
+    } else if (ev.type === 'done') {
+      evtSource.close();
+      deploying = false;
+      document.getElementById('deploy-btn').disabled = false;
+      document.getElementById('parse-btn').disabled = false;
+      document.getElementById('progress-label-text').textContent = 'Deployment complete';
+    }
+  };
+});
+
+function setProgress(done, total) {
+  const pct = Math.round(done / total * 100);
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label-pct').textContent = pct + '%';
+  document.getElementById('progress-label-text').textContent = `${done} / ${total} campaigns`;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+checkAuth();
+</script>
+</body>
+</html>
