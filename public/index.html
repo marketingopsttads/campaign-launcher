@@ -224,6 +224,7 @@
                 <th>Budget/day</th>
                 <th>Bid</th>
                 <th>Targeting</th>
+                <th>Language</th>
                 <th>Schedule</th>
                 <th>Videos</th>
                 <th>Headlines</th>
@@ -430,6 +431,7 @@ function rowHtml(r) {
     <td style="color:${hasErrors && !(r.budget > 0) ? '#f87171' : ''}">$${r.budget > 0 ? r.budget : '—'}</td>
     <td>${bidPill}</td>
     <td>${targetPill}</td>
+    <td>${esc(r.language || '—')}</td>
     <td style="white-space:nowrap;color:${hasErrors && !r.start_date ? '#f87171' : ''}">${esc(r.start_date || '—')}<br><span style="color:#64748b;font-size:0.72rem">${esc(r.start_time)} UTC</span></td>
     <td><div class="video-list">${r.videos.length ? r.videos.map((v, i) => `<a class="video-link" href="${esc(v)}" target="_blank">Video ${i+1}</a>`).join('') : '<span style="color:#f87171;font-size:0.72rem">No videos</span>'}</div></td>
     <td><div class="headline-list">${r.headlines.length ? r.headlines.map(h => `<span class="headline-item">${esc(h)}</span>`).join('') : '<span style="color:#f87171;font-size:0.72rem">No headlines</span>'}</div></td>

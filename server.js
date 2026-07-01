@@ -229,6 +229,16 @@ app.get('/sample', requireAuth, async (req, res) => {
 
   const geos = Object.keys(GEO_MAP);
 
+  // Language names from TikTok /tool/language/ — keep in sync with LANGUAGE_NAME_TO_CODE
+  const LANGUAGE_NAMES = [
+    'Arabic','Assamese','Haryanvi','Bihari','Bengali','Czech','German','Greek',
+    'English','Spanish','Finnish','French','Gujarati','Hebrew','Hindi','Hungarian',
+    'Indonesian','Italian','Japanese','Khmer','Kannada','Korean','Malayalam',
+    'Marathi','Malay','Dutch','Oriya','Punjabi','Polish','Portuguese','Rajasthani',
+    'Romanian','Russian','Swedish','Tamil','Telugu','Thai','Turkish','Ukrainian',
+    'Vietnamese','Simplified Chinese','Traditional Chinese',
+  ];
+
   const wb = new ExcelJS.Workbook();
 
   // ── Hidden lookups sheet (source for dropdown ranges) ──
@@ -237,6 +247,7 @@ app.get('/sample', requireAuth, async (req, res) => {
   accountNames.forEach((n, i) => { lookups.getCell(i + 1, 1).value = n; });
   identityNames.forEach((n, i) => { lookups.getCell(i + 1, 2).value = n; });
   geos.forEach((g, i) => { lookups.getCell(i + 1, 3).value = g; });
+  LANGUAGE_NAMES.forEach((n, i) => { lookups.getCell(i + 1, 4).value = n; });
 
   // ── Main campaigns sheet ──
   const ws = wb.addWorksheet('Campaigns');
@@ -250,6 +261,7 @@ app.get('/sample', requireAuth, async (req, res) => {
     { key: 'bid_strategy',  label: 'bid_strategy',   width: 16 },
     { key: 'bid_amount',    label: 'bid_amount',     width: 12 },
     { key: 'targeting',     label: 'targeting',      width: 16 },
+    { key: 'language',      label: 'language',       width: 18 },
     { key: 'start_date',    label: 'start_date',     width: 14 },
     { key: 'start_time',    label: 'start_time',     width: 12 },
     ...Array.from({length:10},(_,i) => ({ key:`video_url_${i+1}`, label:`video_url_${i+1}`, width: 44 })),
@@ -279,7 +291,7 @@ app.get('/sample', requireAuth, async (req, res) => {
   ws.addRow({
     account_name: accountNames[0], identity_name: identityNames[0],
     campaign_name: 'Example_Campaign_Jul', geo: 'US', budget: 30,
-    bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
+    bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD', language: 'English',
     start_date: exampleDate, start_time: '00:00',
     video_url_1: 'https://videosapi.net/videos/example1.mp4',
     headline_1: 'Your headline here', headline_2: 'Second headline',
@@ -288,7 +300,7 @@ app.get('/sample', requireAuth, async (req, res) => {
   ws.addRow({
     account_name: accountNames[0], identity_name: identityNames[0],
     campaign_name: 'Example_Campaign_2_Jul', geo: 'US', budget: 50,
-    bid_strategy: 'COST_CAP', bid_amount: 0.75, targeting: 'AGE_35_PLUS',
+    bid_strategy: 'COST_CAP', bid_amount: 0.75, targeting: 'AGE_35_PLUS', language: 'German',
     start_date: exampleDate, start_time: '08:00',
     video_url_1: 'https://videosapi.net/videos/example2.mp4',
     headline_1: 'Another headline', headline_2: 'Try it today',
@@ -300,6 +312,7 @@ app.get('/sample', requireAuth, async (req, res) => {
   const acctRef   = `'_Lookups'!$A$1:$A$${accountNames.length}`;
   const identRef  = `'_Lookups'!$B$1:$B$${identityNames.length}`;
   const geoRef    = `'_Lookups'!$C$1:$C$${geos.length}`;
+  const langRef   = `'_Lookups'!$D$1:$D$${LANGUAGE_NAMES.length}`;
 
   for (let row = 2; row <= DATA_ROWS + 1; row++) {
     ws.getCell(row, colIndex.account_name).dataValidation  = { type: 'list', allowBlank: true, formulae: [acctRef] };
@@ -307,6 +320,7 @@ app.get('/sample', requireAuth, async (req, res) => {
     ws.getCell(row, colIndex.geo).dataValidation           = { type: 'list', allowBlank: true, formulae: [geoRef] };
     ws.getCell(row, colIndex.bid_strategy).dataValidation  = { type: 'list', allowBlank: true, formulae: ['"LOWEST_COST,COST_CAP"'] };
     ws.getCell(row, colIndex.targeting).dataValidation     = { type: 'list', allowBlank: true, formulae: ['"BROAD,AGE_35_PLUS"'] };
+    ws.getCell(row, colIndex.language).dataValidation      = { type: 'list', allowBlank: true, formulae: [langRef] };
     // Date validation so blank cells also inherit calendar format
     ws.getCell(row, colIndex.start_date).dataValidation    = { type: 'date', allowBlank: true, operator: 'greaterThan', formulae: [new Date(2020, 0, 1)] };
     ws.getCell(row, colIndex.start_date).numFmt = 'dd/mm/yyyy';
@@ -382,6 +396,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
       const geo = (r.geo || '').toUpperCase();
       const bid_strategy = (r.bid_strategy || '').toUpperCase();
       const targeting = (r.targeting || '').toUpperCase();
+      const language = (r.language || '').trim(); // language name e.g. "German"
       const budget = parseFloat(r.budget);
       const bid_amount = parseFloat(r.bid_amount) || null;
 
@@ -418,6 +433,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
         videos,
         headlines,
         url: r.url,
+        language,
         validationErrors,
         status: 'pending',
         error: null,
@@ -656,9 +672,24 @@ async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
   if (timeMatch) { hh = timeMatch[1].padStart(2,'0'); mm = timeMatch[2]; }
   const schedule_start = `${datePart} ${hh}:${mm}:00`;
 
+  // Map language name → code using the same list from /tool/language/
+  const LANGUAGE_NAME_TO_CODE = {
+    'arabic':'ar','assamese':'as','haryanvi':'bgc','bihari':'bh','bengali':'bn',
+    'czech':'cs','german':'de','greek':'el','english':'en','spanish':'es',
+    'finnish':'fi','french':'fr','gujarati':'gu','hebrew':'he','hindi':'hi',
+    'hungarian':'hu','indonesian':'id','italian':'it','japanese':'ja','khmer':'km',
+    'kannada':'kn','korean':'ko','malayalam':'ml','marathi':'mr','malay':'ms',
+    'dutch':'nl','oriya':'or','punjabi':'pa','polish':'pl','portuguese':'pt',
+    'rajasthani':'raj','romanian':'ro','russian':'ru','swedish':'sv','tamil':'ta',
+    'telugu':'te','thai':'th','turkish':'tr','ukrainian':'uk','vietnamese':'vi',
+    'simplified chinese':'zh','traditional chinese':'zh-hant',
+  };
+  const langCode = row.language ? LANGUAGE_NAME_TO_CODE[row.language.toLowerCase()] : null;
+
   const targeting_spec = {
     location_ids: [location_id],
     ...(row.targeting === 'AGE_35_PLUS' ? { age_groups: ['AGE_35_44', 'AGE_45_54', 'AGE_55_100'] } : {}),
+    ...(langCode ? { languages: [langCode] } : {}),
   };
 
   return ttPost('/smart_plus/adgroup/create/', {
