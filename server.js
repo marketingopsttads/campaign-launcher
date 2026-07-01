@@ -313,10 +313,35 @@ app.get('/sample', requireAuth, async (req, res) => {
   res.end();
 });
 
-app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
+app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) => {
   try {
-    const text = req.file.buffer.toString('utf8');
-    const records = parse(text, { columns: true, skip_empty_lines: true, trim: true });
+    let records;
+    const isXlsx = req.file.originalname.endsWith('.xlsx') || req.file.originalname.endsWith('.xls');
+
+    if (isXlsx) {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(req.file.buffer);
+      const ws = wb.worksheets.find(s => !s.name.startsWith('_')) || wb.worksheets[0];
+      const headers = [];
+      ws.getRow(1).eachCell((cell, col) => { headers[col] = String(cell.value || '').trim(); });
+      records = [];
+      ws.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+        const obj = {};
+        let hasValue = false;
+        row.eachCell((cell, col) => {
+          const key = headers[col];
+          if (!key) return;
+          const val = cell.value === null || cell.value === undefined ? '' : String(cell.value).trim();
+          obj[key] = val;
+          if (val) hasValue = true;
+        });
+        if (hasValue) records.push(obj);
+      });
+    } else {
+      const text = req.file.buffer.toString('utf8');
+      records = parse(text, { columns: true, skip_empty_lines: true, trim: true });
+    }
 
     const rows = records.map((r, i) => {
       const videos = [];
