@@ -160,9 +160,18 @@
       <button class="btn-upload" id="parse-btn">Preview CSV</button>
       <a href="/sample" class="btn-upload" style="text-decoration:none;">⬇ Download Template</a>
     </div>
-    <div id="identity-error" style="color:#f87171;font-size:0.8rem;margin-bottom:16px;display:none;">
-      <span id="identity-error-text"></span>
-      &nbsp;<a href="/auth" style="color:#6366f1;text-decoration:underline;">Re-connect TikTok →</a>
+    <div id="identity-error" style="background:#1c0f0f;border:1px solid #450a0a;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:none;">
+      <div style="color:#f87171;font-size:0.83rem;margin-bottom:10px;"><span id="identity-error-text"></span></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <a href="/auth" target="_blank" style="background:#6366f1;color:#fff;border-radius:6px;padding:6px 14px;font-size:0.8rem;text-decoration:none;white-space:nowrap;">Connect TikTok →</a>
+        <span style="color:#64748b;font-size:0.78rem;">After authorizing, copy the <code style="background:#2d2d3f;padding:1px 5px;border-radius:3px;">auth_code</code> from the redirect URL and paste it here:</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <input id="auth-code-input" type="text" placeholder="Paste auth_code here…"
+          style="flex:1;background:#0f0f13;border:1px solid #2d2d3f;border-radius:6px;padding:7px 10px;color:#e2e8f0;font-size:0.8rem;outline:none;" />
+        <button onclick="submitAuthCode()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:0.8rem;cursor:pointer;white-space:nowrap;">Exchange Token</button>
+      </div>
+      <div id="auth-code-error" style="color:#f87171;font-size:0.75rem;margin-top:6px;display:none;"></div>
     </div>
 
     <!-- Progress bar -->
@@ -245,6 +254,27 @@ function showDashboard() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
   loadIdentities();
+}
+
+// ── TikTok auth code exchange ─────────────────────────────────────────────
+async function submitAuthCode() {
+  const code = document.getElementById('auth-code-input').value.trim();
+  const errEl = document.getElementById('auth-code-error');
+  if (!code) return;
+  errEl.style.display = 'none';
+  const res = await fetch('/api/exchange-token', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ auth_code: code }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('identity-error').style.display = 'none';
+    document.getElementById('auth-code-input').value = '';
+    loadIdentities();
+  } else {
+    errEl.textContent = data.error || 'Exchange failed';
+    errEl.style.display = 'block';
+  }
 }
 
 // ── Identities ────────────────────────────────────────────────────────────

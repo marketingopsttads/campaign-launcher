@@ -61,26 +61,26 @@ app.get('/auth', requireAuth, (req, res) => {
   res.redirect(url.toString());
 });
 
-app.get('/auth/callback', async (req, res) => {
-  const { code, state } = req.query;
-  if (!code) return res.send('<p>Auth failed — no code returned. <a href="/">Go back</a></p>');
-
+// User pastes the auth_code from the advertising.tech redirect URL
+app.post('/api/exchange-token', requireAuth, async (req, res) => {
+  const { auth_code } = req.body;
+  if (!auth_code) return res.status(400).json({ error: 'auth_code required' });
   try {
     const r = await fetch(`${TT_BASE}/oauth2/access_token/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app_id: APP_ID, secret: APP_SECRET, auth_code: code }),
+      body: JSON.stringify({ app_id: APP_ID, secret: APP_SECRET, auth_code }),
     });
     const data = await r.json();
     if (data.data?.access_token) {
       activeToken = data.data.access_token;
-      console.log('TikTok token refreshed via OAuth');
-      res.redirect('/?auth=success');
+      console.log('TikTok token exchanged successfully');
+      res.json({ ok: true });
     } else {
-      res.send(`<p>Token exchange failed: ${JSON.stringify(data)}</p><a href="/">Go back</a>`);
+      res.status(400).json({ error: `TikTok error ${data.code}: ${data.message}` });
     }
   } catch (e) {
-    res.send(`<p>Error: ${e.message}</p><a href="/">Go back</a>`);
+    res.status(500).json({ error: e.message });
   }
 });
 
