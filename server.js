@@ -460,8 +460,25 @@ async function createAdGroup(row, campaign_id) {
   return ttPost('/smart_plus/adgroup/create/', body);
 }
 
+async function waitForVideoReady(video_id) {
+  // Poll until TikTok has processed the video (cover URL appears in ad/info)
+  for (let i = 0; i < 24; i++) {
+    try {
+      const res = await ttGet('/file/video/ad/info/', { video_ids: JSON.stringify([video_id]) });
+      const info = res.data?.list?.[0];
+      if (info?.video_cover_url) {
+        console.log(`Video ${video_id} ready after ${i * 5}s`);
+        return true;
+      }
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  console.warn(`Video ${video_id} not ready after 2 minutes`);
+  return false;
+}
+
 async function getVideoCoverId(video_id) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
       const cover = res.data?.list?.[0];
@@ -470,15 +487,16 @@ async function getVideoCoverId(video_id) {
     } catch (e) {
       console.warn(`Cover fetch error for ${video_id} (attempt ${attempt}):`, e.message);
     }
-    if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+    if (attempt < 5) await new Promise(r => setTimeout(r, 5000));
   }
   return null;
 }
 
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id) {
-  // Pre-fetch a cover image ID for each video (required for SINGLE_VIDEO ads)
+  // Wait for all videos to finish processing, then fetch covers
   const coverMap = {};
   for (const video_id of video_ids) {
+    await waitForVideoReady(video_id);
     const cover_id = await getVideoCoverId(video_id);
     if (cover_id) coverMap[video_id] = cover_id;
   }
