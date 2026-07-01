@@ -502,8 +502,9 @@ async function getVideoCoverImageId(video_id) {
 
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises) {
   // Await cover promises — started in parallel during video upload, should be ready by now
+  const dedupedIds = [...new Set(video_ids)];
   const coverMap = {};
-  for (const video_id of video_ids) {
+  for (const video_id of dedupedIds) {
     const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id));
     if (image_id) coverMap[video_id] = image_id;
   }
@@ -517,7 +518,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     ...(resolvedIdentityType === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id || BC_ID } : {}),
   };
 
-  const creative_list = video_ids.map(video_id => {
+  const creative_list = dedupedIds.map(video_id => {
     const cover = coverMap[video_id];
     if (!cover) throw new Error(`Could not fetch cover image for video ${video_id} — required for Smart Plus ads`);
     return {
