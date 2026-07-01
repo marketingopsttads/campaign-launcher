@@ -406,7 +406,7 @@ async function createAdGroup(row, campaign_id) {
     pacing: 'PACING_MODE_SMOOTH',
     promotion_type: 'WEBSITE',
     pixel_id: PIXEL_ID,
-    optimization_event: 'ON_WEB_ORDER',
+    optimization_event: 'SHOPPING',
     location_ids: [location_id],
     bid_type: row.bid_strategy === 'COST_CAP' ? 'BID_TYPE_CUSTOM' : 'BID_TYPE_NO_BID',
     ...(row.bid_strategy === 'COST_CAP' && row.bid_amount ? { conversion_bid_price: row.bid_amount } : {}),
