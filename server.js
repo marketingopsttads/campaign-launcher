@@ -169,6 +169,41 @@ async function appendLog(entry) {
   }
 }
 
+// ── Video URL cache (URL → video_id) ──────────────────────────────────────
+const VIDEO_CACHE_KEY  = 'video-cache.json';
+const VIDEO_CACHE_LOCAL = path.join(__dirname, 'video-cache.json');
+
+async function r2Get(key) {
+  if (r2) {
+    try {
+      const res = await r2.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+      return JSON.parse(await res.Body.transformToString());
+    } catch (e) { if (e.name !== 'NoSuchKey') console.error(`R2 get ${key}:`, e.message); }
+  } else {
+    const local = key === LOG_KEY
+      ? (process.env.LOG_PATH || path.join(__dirname, 'campaign-logs.json'))
+      : VIDEO_CACHE_LOCAL;
+    try { if (fs.existsSync(local)) return JSON.parse(fs.readFileSync(local, 'utf8')); } catch (_) {}
+  }
+  return null;
+}
+
+async function r2Put(key, data) {
+  const body = JSON.stringify(data, null, 2);
+  if (r2) {
+    try { await r2.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: body, ContentType: 'application/json' })); }
+    catch (e) { console.error(`R2 put ${key}:`, e.message); }
+  } else {
+    const local = key === LOG_KEY
+      ? (process.env.LOG_PATH || path.join(__dirname, 'campaign-logs.json'))
+      : VIDEO_CACHE_LOCAL;
+    try { fs.writeFileSync(local, body); } catch (e) { console.error(`Local put ${key}:`, e.message); }
+  }
+}
+
+async function getVideoCache() { return (await r2Get(VIDEO_CACHE_KEY)) || {}; }
+async function saveVideoCache(cache) { await r2Put(VIDEO_CACHE_KEY, cache); }
+
 // ── In-memory stores ───────────────────────────────────────────────────────
 const jobs = new Map();
 let pixelCache = {};     // adv_id -> pixel_id
@@ -660,7 +695,8 @@ async function findExistingVideo(baseName, adv_id) {
 async function uploadVideos(urls, adv_id, jobId, rowIndex) {
   const ids = [];
   const coverPromises = {};
-  const urlToId = {}; // cache URL→video_id within this upload batch
+  const urlToId = {}; // within-batch dedup
+  const videoCache = await getVideoCache(); // persistent URL→video_id across runs
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
     const videoNum = i + 1;
@@ -669,10 +705,19 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
       ids.push(urlToId[url]);
       continue;
     }
+    // Check persistent cache first — avoids upload attempt when we already know the ID
+    if (videoCache[url]) {
+      const cached_id = videoCache[url];
+      console.log(`Cache hit for ${url}: ${cached_id}`);
+      ids.push(cached_id);
+      urlToId[url] = cached_id;
+      coverPromises[cached_id] = getVideoCoverImageId(cached_id, adv_id);
+      continue;
+    }
     try {
       // Use the TAIL of the filename so V1/V2/V3 suffixes are preserved and unique
       const fullName = url.split('/').pop().replace(/\.[^.]+$/, '');
-      const tail = fullName.slice(-50); // take the end, not the start
+      const tail = fullName.slice(-50);
       const rand = Math.random().toString(36).slice(2, 8);
       const video_name = `${tail}_${rand}`;
       const res = await ttPost('/file/video/ad/upload/', {
@@ -682,11 +727,11 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
         flaw_detect: true,
         auto_fix_enabled: true,
       }, adv_id);
-      // Check for video_id in success response
       const video_id = res.data?.video_id || res.data?.[0]?.video_id;
       if (video_id) {
         ids.push(video_id);
         urlToId[url] = video_id;
+        videoCache[url] = video_id;
         coverPromises[video_id] = getVideoCoverImageId(video_id, adv_id);
       } else if (res.code === 40911) {
         // TikTok detected duplicate — check if it returned the existing ID directly
@@ -694,16 +739,17 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
         if (dup_id) {
           ids.push(dup_id);
           urlToId[url] = dup_id;
+          videoCache[url] = dup_id;
           coverPromises[dup_id] = getVideoCoverImageId(dup_id, adv_id);
         } else {
-          // Fall back to library search using the URL tail (unique per V1/V2/V3)
-          const fullName = url.split('/').pop().replace(/\.[^.]+$/, '');
+          // Last resort: name search (may fail for videos with truncated filenames)
           const searchTail = fullName.slice(-50);
           const existing_id = await findExistingVideo(searchTail, adv_id);
           if (existing_id) {
             console.log(`Reusing existing video for ${url}: ${existing_id}`);
             ids.push(existing_id);
             urlToId[url] = existing_id;
+            videoCache[url] = existing_id;
             coverPromises[existing_id] = getVideoCoverImageId(existing_id, adv_id);
           } else {
             const warn = `Video ${videoNum} skipped (duplicate, not found in library): ${url}`;
@@ -722,6 +768,8 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
       if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `⚠ ${warn}` });
     }
   }
+  // Persist any new URL→video_id mappings we discovered
+  await saveVideoCache(videoCache);
   if (!ids.length) throw new Error('No videos uploaded successfully');
   return { ids, coverPromises };
 }
