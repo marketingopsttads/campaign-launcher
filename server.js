@@ -267,12 +267,16 @@ app.get('/sample', requireAuth, async (req, res) => {
   });
   ws.getRow(1).height = 20;
 
-  // Example rows
+  // Set start_date column as date format so Excel shows a calendar picker
+  const startDateColNum = colIndex.start_date;
+  ws.getColumn(startDateColNum).numFmt = 'dd/mm/yyyy';
+
+  const exampleDate = new Date(2026, 6, 10); // July 10 2026 (month is 0-indexed)
   ws.addRow({
     account_name: accountNames[0], identity_name: identityNames[0],
     campaign_name: 'Example_Campaign_Jul', geo: 'US', budget: 30,
     bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
-    start_date: '10/07/2026', start_time: '00:00',
+    start_date: exampleDate, start_time: '00:00',
     video_url_1: 'https://videosapi.net/videos/example1.mp4',
     headline_1: 'Your headline here', headline_2: 'Second headline',
     url: 'https://yoursite.com/landing',
@@ -281,7 +285,7 @@ app.get('/sample', requireAuth, async (req, res) => {
     account_name: accountNames[0], identity_name: identityNames[0],
     campaign_name: 'Example_Campaign_2_Jul', geo: 'US', budget: 50,
     bid_strategy: 'COST_CAP', bid_amount: 0.75, targeting: 'AGE_35_PLUS',
-    start_date: '10/07/2026', start_time: '08:00',
+    start_date: exampleDate, start_time: '08:00',
     video_url_1: 'https://videosapi.net/videos/example2.mp4',
     headline_1: 'Another headline', headline_2: 'Try it today',
     url: 'https://yoursite.com/offer',
@@ -302,6 +306,9 @@ app.get('/sample', requireAuth, async (req, res) => {
     ws.getCell(row, colIndex.geo).dataValidation           = { type: 'list', allowBlank: true, formulae: [geoRef] };
     ws.getCell(row, colIndex.bid_strategy).dataValidation  = { type: 'list', allowBlank: true, formulae: ['"LOWEST_COST,COST_CAP"'] };
     ws.getCell(row, colIndex.targeting).dataValidation     = { type: 'list', allowBlank: true, formulae: ['"BROAD,AGE_35_PLUS"'] };
+    // Date validation so blank cells also inherit calendar format
+    ws.getCell(row, colIndex.start_date).dataValidation    = { type: 'date', allowBlank: true, operator: 'greaterThan', formulae: [new Date(2020, 0, 1)] };
+    ws.getCell(row, colIndex.start_date).numFmt = 'dd/mm/yyyy';
   }
 
   // Freeze header row
@@ -332,7 +339,14 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
         row.eachCell((cell, col) => {
           const key = headers[col];
           if (!key) return;
-          const val = cell.value === null || cell.value === undefined ? '' : String(cell.value).trim();
+          let val;
+          if (cell.value instanceof Date) {
+            // Excel date cell → YYYY-MM-DD (local date, avoid UTC offset shifts)
+            const d = cell.value;
+            val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          } else {
+            val = cell.value === null || cell.value === undefined ? '' : String(cell.value).trim();
+          }
           obj[key] = val;
           if (val) hasValue = true;
         });
