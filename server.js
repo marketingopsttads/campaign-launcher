@@ -338,7 +338,7 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
 async function createCampaign(row) {
   const body = {
     campaign_name: row.campaign_name,
-    objective_type: 'CONVERSIONS',
+    objective_type: 'WEB_CONVERSIONS',
     budget_mode: 'BUDGET_MODE_INFINITE',
     budget_optimize_on: false,
     operation_status: 'ENABLE',
@@ -400,7 +400,7 @@ async function createAdGroup(row, campaign_id) {
     campaign_id,
     adgroup_name: `${row.campaign_name}_adgroup`,
     placement_type: 'PLACEMENT_TYPE_AUTOMATIC',
-    budget_mode: 'BUDGET_MODE_DAY',
+    budget_mode: 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET',
     budget: row.budget,
     schedule_type: 'SCHEDULE_FROM_NOW',
     schedule_start_time: schedule_start,
