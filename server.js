@@ -306,19 +306,19 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
         throw new Error(campaign.code === 40911 || (msg && msg.includes('already')) ? `Campaign name "${row.campaign_name}" already exists in TikTok — rename it in the CSV and retry` : `Campaign failed: ${msg}`);
       }
 
-      // 2. Upload videos
+      // 2. Upload videos — cover fetches start immediately in background
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Uploading ${row.videos.length} video(s)…` });
-      const video_ids = await uploadVideos(row.videos);
+      const { ids: video_ids, coverPromises } = await uploadVideos(row.videos);
 
-      // 3. Create ad group
+      // 3. Create ad group (cover fetches run in parallel while this completes)
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating ad group…' });
       const adgroup = await createAdGroup(row, campaign_id);
       const adgroup_id = adgroup.data?.adgroup_id;
       if (!adgroup_id) throw new Error(`Ad group failed: ${JSON.stringify(adgroup)}`);
 
-      // 4. Create ads (video × headline combinations)
-      jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Creating ${video_ids.length * row.headlines.length} ads…` });
-      await createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id);
+      // 4. Create ads — covers should be ready or nearly ready by now
+      jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Creating ads…` });
+      await createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises);
 
       jobEmit(jobId, { type: 'row_done', rowIndex: row.rowIndex, campaign_id });
 
@@ -372,6 +372,7 @@ async function findExistingVideo(baseName) {
 
 async function uploadVideos(urls) {
   const ids = [];
+  const coverPromises = {}; // video_id -> Promise<image_id|null>, started immediately after upload
   const errors = [];
   for (const url of urls) {
     try {
@@ -388,12 +389,13 @@ async function uploadVideos(urls) {
       const video_id = res.data?.video_id || res.data?.[0]?.video_id;
       if (video_id) {
         ids.push(video_id);
+        coverPromises[video_id] = getVideoCoverImageId(video_id); // fire and forget — runs while campaign/adgroup are created
       } else if (res.code === 40911) {
-        // Video already exists in library — find and reuse it
         const existing_id = await findExistingVideo(baseName);
         if (existing_id) {
           console.log(`Reusing existing video for ${url}: ${existing_id}`);
           ids.push(existing_id);
+          coverPromises[existing_id] = getVideoCoverImageId(existing_id);
         } else {
           const msg = `Upload failed (duplicate) and could not find existing video for ${url}`;
           console.warn(msg);
@@ -411,7 +413,7 @@ async function uploadVideos(urls) {
     }
   }
   if (!ids.length) throw new Error(errors.join(' | ') || 'No videos uploaded successfully');
-  return ids;
+  return { ids, coverPromises };
 }
 
 async function createAdGroup(row, campaign_id) {
@@ -513,11 +515,11 @@ async function getVideoCoverImageId(video_id) {
   return null;
 }
 
-async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id) {
-  // Wait for processing and upload cover image for each video
+async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises) {
+  // Await cover promises — started in parallel during video upload, should be ready by now
   const coverMap = {};
   for (const video_id of video_ids) {
-    const image_id = await getVideoCoverImageId(video_id);
+    const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id));
     if (image_id) coverMap[video_id] = image_id;
   }
 
