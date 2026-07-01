@@ -461,34 +461,54 @@ async function createAdGroup(row, campaign_id) {
 }
 
 async function getVideoCoverImageId(video_id) {
-  // Poll file/video/ad/info until video_cover_url is available (up to 2 min)
-  let cover_url = null;
+  // Step 1: wait until file/video/ad/info confirms the video is processed
+  let ready = false;
   for (let i = 0; i < 24; i++) {
     try {
       const res = await ttGet('/file/video/ad/info/', { video_ids: JSON.stringify([video_id]) });
       const info = res.data?.list?.[0];
-      if (info?.video_cover_url) { cover_url = info.video_cover_url; break; }
+      if (info?.video_cover_url) { ready = true; break; }
     } catch (e) {}
     console.log(`Waiting for video ${video_id} to process (${i * 5}s)…`);
     await new Promise(r => setTimeout(r, 5000));
   }
-  if (!cover_url) { console.warn(`Video ${video_id} cover URL not available after 2 minutes`); return null; }
+  if (!ready) { console.warn(`Video ${video_id} not ready after 2 minutes`); return null; }
 
-  // Upload the cover URL as an image to get an image_id TikTok accepts in ad create
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  // Step 2: try suggestcover (up to 6 attempts, 10s apart)
+  for (let attempt = 1; attempt <= 6; attempt++) {
     try {
-      const res = await ttPost('/file/image/ad/upload/', {
+      const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
+      const cover = res.data?.list?.[0];
+      if (cover?.image_id) {
+        console.log(`suggestcover ok for ${video_id}: ${cover.image_id}`);
+        return cover.image_id;
+      }
+      console.log(`suggestcover attempt ${attempt} empty for ${video_id}, code=${res.code} data=${JSON.stringify(res.data)}`);
+    } catch (e) {
+      console.warn(`suggestcover attempt ${attempt} error:`, e.message);
+    }
+    await new Promise(r => setTimeout(r, 10000));
+  }
+
+  // Step 3: fallback — re-fetch cover_url and upload as JPEG via TikTok CDN format transform
+  console.log(`suggestcover exhausted for ${video_id}, trying image upload fallback`);
+  try {
+    const infoRes = await ttGet('/file/video/ad/info/', { video_ids: JSON.stringify([video_id]) });
+    const raw_url = infoRes.data?.list?.[0]?.video_cover_url;
+    if (raw_url) {
+      // Transform TikTok CDN URL to JPEG format
+      const jpeg_url = raw_url.replace(/~tplv-[^.]+\.image/, '~tplv-obj.jpeg');
+      const uploadRes = await ttPost('/file/image/ad/upload/', {
         upload_type: 'UPLOAD_BY_URL',
-        image_url: cover_url,
+        image_url: jpeg_url,
         image_name: `cover_${video_id}_${Date.now()}`,
       });
-      const image_id = res.data?.image_id;
-      if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
-      console.warn(`Cover image upload attempt ${attempt} failed: code=${res.code} msg=${res.message}`);
-    } catch (e) {
-      console.warn(`Cover image upload attempt ${attempt} error:`, e.message);
+      const image_id = uploadRes.data?.image_id;
+      if (image_id) { console.log(`Cover fallback image_id for ${video_id}: ${image_id}`); return image_id; }
+      console.warn(`Cover fallback upload failed: code=${uploadRes.code} msg=${uploadRes.message}`);
     }
-    if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
+  } catch (e) {
+    console.warn(`Cover fallback error for ${video_id}:`, e.message);
   }
   return null;
 }
