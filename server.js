@@ -461,12 +461,16 @@ async function createAdGroup(row, campaign_id) {
 }
 
 async function getVideoCoverId(video_id) {
-  try {
-    const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
-    const cover = res.data?.list?.[0];
-    if (cover?.image_id) return cover.image_id;
-  } catch (e) {
-    console.warn(`Could not fetch cover for ${video_id}:`, e.message);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
+      const cover = res.data?.list?.[0];
+      if (cover?.image_id) return cover.image_id;
+      console.warn(`No cover returned for ${video_id} (attempt ${attempt}), code=${res.code}`);
+    } catch (e) {
+      console.warn(`Cover fetch error for ${video_id} (attempt ${attempt}):`, e.message);
+    }
+    if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
   }
   return null;
 }
@@ -480,13 +484,18 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   }
 
   // Smart Plus: pass all video creatives + all headlines in one ad; TikTok rotates/optimizes
-  const creative_list = video_ids.map(video_id => ({
-    creative_info: {
-      ad_format: 'SINGLE_VIDEO',
-      video_info: { video_id },
-      ...(coverMap[video_id] ? { image_info: [{ web_uri: coverMap[video_id] }] } : {}),
-    },
-  }));
+  // image_info (cover) is required for every SINGLE_VIDEO creative
+  const creative_list = video_ids.map(video_id => {
+    const cover = coverMap[video_id];
+    if (!cover) throw new Error(`Could not fetch cover image for video ${video_id} — required for Smart Plus ads`);
+    return {
+      creative_info: {
+        ad_format: 'SINGLE_VIDEO',
+        video_info: { video_id },
+        image_info: [{ web_uri: cover }],
+      },
+    };
+  });
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
