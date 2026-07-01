@@ -337,17 +337,16 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
 
 async function createCampaign(row) {
   const body = {
+    request_id: Date.now().toString(),
     campaign_name: row.campaign_name,
     objective_type: 'WEB_CONVERSIONS',
-    virtual_objective_type: 'SALES',
     sales_destination: 'WEBSITE',
     budget_optimize_on: true,
     budget_mode: 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET',
     budget: row.budget,
     operation_status: 'ENABLE',
-    campaign_automation_type: 'UPGRADED_SMART_PLUS',
   };
-  return ttPost('/campaign/create/', body);
+  return ttPost('/smart_plus/campaign/create/', body);
 }
 
 async function findExistingVideo(baseName) {
@@ -434,27 +433,31 @@ async function createAdGroup(row, campaign_id) {
   if (timeMatch) { hh = timeMatch[1].padStart(2,'0'); mm = timeMatch[2]; }
   const schedule_start = `${datePart} ${hh}:${mm}:00`;
 
-  const body = {
-    campaign_id,
-    adgroup_name: `${row.campaign_name}_adgroup`,
-    placement_type: 'PLACEMENT_TYPE_NORMAL',
-    placements: ['PLACEMENT_TIKTOK'],
-    budget_mode: 'BUDGET_MODE_INFINITE',
-    schedule_type: 'SCHEDULE_FROM_NOW',
-    schedule_start_time: schedule_start,
-    optimization_goal: 'CONVERT',
-    billing_event: 'OCPM',
-    pacing: 'PACING_MODE_SMOOTH',
-    promotion_type: 'WEBSITE',
-    pixel_id: PIXEL_ID,
-    optimization_event: 'SHOPPING',
+  const targeting_spec = {
     location_ids: [location_id],
-    bid_type: row.bid_strategy === 'COST_CAP' ? 'BID_TYPE_CUSTOM' : 'BID_TYPE_NO_BID',
-    ...(row.bid_strategy === 'COST_CAP' && row.bid_amount ? { conversion_bid_price: row.bid_amount } : {}),
     ...(row.targeting === 'AGE_35_PLUS' ? { age_groups: ['AGE_35_44', 'AGE_45_54', 'AGE_55_100'] } : {}),
   };
 
-  return ttPost('/adgroup/create/', body);
+  const body = {
+    request_id: (Date.now() + 1).toString(),
+    campaign_id,
+    adgroup_name: `${row.campaign_name}_adgroup`,
+    promotion_type: 'WEBSITE',
+    placement_type: 'PLACEMENT_TYPE_NORMAL',
+    placements: ['PLACEMENT_TIKTOK'],
+    targeting_optimization_mode: 'MANUAL',
+    targeting_spec,
+    optimization_goal: 'CONVERT',
+    billing_event: 'OCPM',
+    pixel_id: PIXEL_ID,
+    optimization_event: 'SHOPPING',
+    schedule_type: 'SCHEDULE_FROM_NOW',
+    schedule_start_time: schedule_start,
+    bid_type: row.bid_strategy === 'COST_CAP' ? 'BID_TYPE_CUSTOM' : 'BID_TYPE_NO_BID',
+    ...(row.bid_strategy === 'COST_CAP' && row.bid_amount ? { conversion_bid_price: row.bid_amount } : {}),
+  };
+
+  return ttPost('/smart_plus/adgroup/create/', body);
 }
 
 async function getVideoCoverId(video_id) {
@@ -469,36 +472,35 @@ async function getVideoCoverId(video_id) {
 }
 
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id) {
-  // Pre-fetch a cover image ID for each video (required for non-Spark SINGLE_VIDEO ads)
+  // Pre-fetch a cover image ID for each video (required for SINGLE_VIDEO ads)
   const coverMap = {};
   for (const video_id of video_ids) {
     const cover_id = await getVideoCoverId(video_id);
     if (cover_id) coverMap[video_id] = cover_id;
   }
 
-  const creatives = [];
-  for (const video_id of video_ids) {
-    for (const headline of row.headlines) {
-      creatives.push({
-        ad_name: `${row.campaign_name}_${video_id.slice(-6)}_${creatives.length + 1}`,
-        ad_format: 'SINGLE_VIDEO',
-        identity_type,
-        identity_id,
-        ...(identity_type === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id } : {}),
-        video_id,
-        ...(coverMap[video_id] ? { image_ids: [coverMap[video_id]] } : {}),
-        ad_text: headline,
-        display_name: row.campaign_name.slice(0, 40),
-        call_to_action: row.cta,
-        landing_page_url: row.url,
-      });
-    }
-  }
+  // Smart Plus: pass all video creatives + all headlines in one ad; TikTok rotates/optimizes
+  const creative_list = video_ids.map(video_id => ({
+    creative_info: {
+      ad_format: 'SINGLE_VIDEO',
+      video_info: { video_id },
+      ...(coverMap[video_id] ? { image_info: [{ web_uri: coverMap[video_id] }] } : {}),
+    },
+  }));
 
-  // TikTok allows max 20 creatives per ad/create call
-  for (let i = 0; i < creatives.length; i += 20) {
-    const batch = creatives.slice(i, i + 20);
-    const res = await ttPost('/ad/create/', { adgroup_id, creatives: batch });
+  const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
+
+  // Smart Plus creative_list limit is 50; split if needed
+  for (let i = 0; i < creative_list.length; i += 50) {
+    const batch = creative_list.slice(i, i + 50);
+    const res = await ttPost('/smart_plus/ad/create/', {
+      adgroup_id,
+      ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
+      ad_text_list,
+      call_to_action_list: [{ call_to_action: row.cta }],
+      landing_page_url_list: [{ landing_page_url: row.url }],
+      creative_list: batch,
+    });
     if (res.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(res)}`);
   }
 }
