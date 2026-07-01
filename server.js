@@ -460,45 +460,45 @@ async function createAdGroup(row, campaign_id) {
   return ttPost('/smart_plus/adgroup/create/', body);
 }
 
-async function waitForVideoReady(video_id) {
-  // Poll until TikTok has processed the video (cover URL appears in ad/info)
+async function getVideoCoverImageId(video_id) {
+  // Poll file/video/ad/info until video_cover_url is available (up to 2 min)
+  let cover_url = null;
   for (let i = 0; i < 24; i++) {
     try {
       const res = await ttGet('/file/video/ad/info/', { video_ids: JSON.stringify([video_id]) });
       const info = res.data?.list?.[0];
-      if (info?.video_cover_url) {
-        console.log(`Video ${video_id} ready after ${i * 5}s`);
-        return true;
-      }
+      if (info?.video_cover_url) { cover_url = info.video_cover_url; break; }
     } catch (e) {}
+    console.log(`Waiting for video ${video_id} to process (${i * 5}s)…`);
     await new Promise(r => setTimeout(r, 5000));
   }
-  console.warn(`Video ${video_id} not ready after 2 minutes`);
-  return false;
-}
+  if (!cover_url) { console.warn(`Video ${video_id} cover URL not available after 2 minutes`); return null; }
 
-async function getVideoCoverId(video_id) {
-  for (let attempt = 1; attempt <= 5; attempt++) {
+  // Upload the cover URL as an image to get an image_id TikTok accepts in ad create
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
-      const cover = res.data?.list?.[0];
-      if (cover?.image_id) return cover.image_id;
-      console.warn(`No cover returned for ${video_id} (attempt ${attempt}), code=${res.code}`);
+      const res = await ttPost('/file/image/ad/upload/', {
+        upload_type: 'UPLOAD_BY_URL',
+        image_url: cover_url,
+        image_name: `cover_${video_id}_${Date.now()}`,
+      });
+      const image_id = res.data?.image_id;
+      if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
+      console.warn(`Cover image upload attempt ${attempt} failed: code=${res.code} msg=${res.message}`);
     } catch (e) {
-      console.warn(`Cover fetch error for ${video_id} (attempt ${attempt}):`, e.message);
+      console.warn(`Cover image upload attempt ${attempt} error:`, e.message);
     }
-    if (attempt < 5) await new Promise(r => setTimeout(r, 5000));
+    if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
   }
   return null;
 }
 
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id) {
-  // Wait for all videos to finish processing, then fetch covers
+  // Wait for processing and upload cover image for each video
   const coverMap = {};
   for (const video_id of video_ids) {
-    await waitForVideoReady(video_id);
-    const cover_id = await getVideoCoverId(video_id);
-    if (cover_id) coverMap[video_id] = cover_id;
+    const image_id = await getVideoCoverImageId(video_id);
+    if (image_id) coverMap[video_id] = image_id;
   }
 
   // Smart Plus: pass all video creatives + all headlines in one ad; TikTok rotates/optimizes
