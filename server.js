@@ -393,7 +393,7 @@ async function createAdGroup(row, campaign_id) {
     pixel_id: PIXEL_ID,
     optimization_event: 'ON_WEB_ORDER',
     location_ids: [location_id],
-    bid_type: row.bid_strategy === 'COST_CAP' ? 'BID_TYPE_CUSTOM' : 'BID_TYPE_NO_BID',
+    bid_type: row.bid_strategy === 'COST_CAP' ? 'BID_TYPE_OCPM' : 'BID_TYPE_NO_BID',
     ...(row.bid_strategy === 'COST_CAP' && row.bid_amount ? { conversion_bid_price: row.bid_amount } : {}),
     ...(row.targeting === 'AGE_35_PLUS' ? { age_groups: ['AGE_35_44', 'AGE_45_54', 'AGE_55_100'] } : {}),
   };
