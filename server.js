@@ -476,41 +476,36 @@ async function getVideoCoverImageId(video_id) {
   }
   if (!ready) { console.warn(`Video ${video_id} not ready after 2 minutes`); return null; }
 
-  // Step 2: try suggestcover (up to 6 attempts, 10s apart)
+  // Step 2: get suggestcover frame URL (field is 'id' + 'url', not 'image_id')
+  let cover_url = null;
   for (let attempt = 1; attempt <= 6; attempt++) {
     try {
       const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
       const cover = res.data?.list?.[0];
-      if (cover?.image_id) {
-        console.log(`suggestcover ok for ${video_id}: ${cover.image_id}`);
-        return cover.image_id;
-      }
-      console.log(`suggestcover attempt ${attempt} empty for ${video_id}, code=${res.code} data=${JSON.stringify(res.data)}`);
+      if (cover?.url) { cover_url = cover.url; break; }
+      console.log(`suggestcover attempt ${attempt} empty for ${video_id}, code=${res.code}`);
     } catch (e) {
       console.warn(`suggestcover attempt ${attempt} error:`, e.message);
     }
     await new Promise(r => setTimeout(r, 10000));
   }
+  if (!cover_url) { console.warn(`suggestcover gave no URL for ${video_id}`); return null; }
 
-  // Step 3: fallback — re-fetch cover_url and upload as JPEG via TikTok CDN format transform
-  console.log(`suggestcover exhausted for ${video_id}, trying image upload fallback`);
-  try {
-    const infoRes = await ttGet('/file/video/ad/info/', { video_ids: JSON.stringify([video_id]) });
-    const raw_url = infoRes.data?.list?.[0]?.video_cover_url;
-    if (raw_url) {
-      // Transform TikTok CDN URL to JPEG format
-      const jpeg_url = raw_url.replace(/~tplv-[^.]+\.image/, '~tplv-obj.jpeg');
+  // Step 3: upload the cover frame URL to get an asset-library image_id for Smart Plus ad create
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
       const uploadRes = await ttPost('/file/image/ad/upload/', {
         upload_type: 'UPLOAD_BY_URL',
-        image_url: jpeg_url,
+        image_url: cover_url,
         image_name: `cover_${video_id}_${Date.now()}`,
       });
       const image_id = uploadRes.data?.image_id;
-      if (image_id) { console.log(`Cover fallback image_id for ${video_id}: ${image_id}`); return image_id; }
-      console.warn(`Cover fallback upload failed: code=${uploadRes.code} msg=${uploadRes.message}`);
+      if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
+      console.warn(`Cover upload attempt ${attempt} failed: code=${uploadRes.code} msg=${uploadRes.message}`);
+    } catch (e) {
+      console.warn(`Cover upload attempt ${attempt} error:`, e.message);
     }
-  } catch (e) {
-    console.warn(`Cover fallback error for ${video_id}:`, e.message);
+    if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
   }
   return null;
 }
