@@ -341,12 +341,22 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
           const key = headers[col];
           if (!key) return;
           let val;
-          if (cell.value instanceof Date) {
-            // Excel date cell → YYYY-MM-DD (local date, avoid UTC offset shifts)
-            const d = cell.value;
-            val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          const cv = cell.value;
+          if (cv instanceof Date) {
+            // Excel date cell → YYYY-MM-DD; treat epoch-zero (empty date cell) as blank
+            if (cv.getFullYear() <= 1900) {
+              val = '';
+            } else {
+              val = `${cv.getFullYear()}-${String(cv.getMonth()+1).padStart(2,'0')}-${String(cv.getDate()).padStart(2,'0')}`;
+            }
+          } else if (cv !== null && cv !== undefined && typeof cv === 'object') {
+            // Hyperlink cell: { text, hyperlink } or { richText: [{text},...] }
+            if (cv.hyperlink) val = cv.hyperlink.trim();
+            else if (cv.text) val = String(cv.text).trim();
+            else if (Array.isArray(cv.richText)) val = cv.richText.map(r => r.text || '').join('').trim();
+            else val = '';
           } else {
-            val = cell.value === null || cell.value === undefined ? '' : String(cell.value).trim();
+            val = cv === null || cv === undefined ? '' : String(cv).trim();
           }
           obj[key] = val;
           if (val) hasValue = true;
