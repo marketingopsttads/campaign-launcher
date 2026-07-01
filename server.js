@@ -674,17 +674,25 @@ async function createCampaign(row, adv_id) {
 }
 
 async function findExistingVideo(baseName, adv_id) {
-  // Use full baseName (not truncated) so similar filenames don't cross-match
-  const baseCore = baseName.replace(/^\d+_/, '').replace(/[_\s-]+/g, ' ').toLowerCase();
+  // Match by the numeric timestamp prefix (e.g. "1782913632494") — TikTok preserves this
+  // even when it truncates the rest of the filename. Falls back to title-text search.
+  const numericPrefix = baseName.match(/^(\d{10,})/)?.[1];
   for (let page = 1; page <= 15; page++) {
     try {
-      const res = await ttGet('/file/video/ad/search/', { page, page_size: 20 }, adv_id);
+      const params = { page, page_size: 20 };
+      if (numericPrefix && page === 1) params.filtering = JSON.stringify({ video_name: numericPrefix });
+      const res = await ttGet('/file/video/ad/search/', params, adv_id);
       const list = res.data?.list || [];
-      const match = list.find(v => {
-        const norm = (v.file_name || '').replace(/[_\s-]+/g, ' ').toLowerCase();
-        return norm.includes(baseCore);
-      });
+      const match = numericPrefix
+        ? list.find(v => (v.file_name || '').startsWith(numericPrefix))
+        : list.find(v => {
+            const norm = (v.file_name || '').replace(/[_\s-]+/g, ' ').toLowerCase();
+            const baseCore = baseName.replace(/^\d+_/, '').replace(/[_\s-]+/g, ' ').toLowerCase();
+            return norm.includes(baseCore);
+          });
       if (match) return match.video_id;
+      // If prefix search found nothing on page 1, don't paginate — prefix is unique
+      if (numericPrefix) break;
       const total = res.data?.page_info?.total_number || 0;
       if (page * 20 >= total) break;
     } catch (_) { break; }
@@ -742,9 +750,8 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
           videoCache[url] = dup_id;
           coverPromises[dup_id] = getVideoCoverImageId(dup_id, adv_id);
         } else {
-          // Last resort: name search (may fail for videos with truncated filenames)
-          const searchTail = fullName.slice(-50);
-          const existing_id = await findExistingVideo(searchTail, adv_id);
+          // Last resort: name search by numeric prefix (preserved even when TikTok truncates)
+          const existing_id = await findExistingVideo(fullName, adv_id);
           if (existing_id) {
             console.log(`Reusing existing video for ${url}: ${existing_id}`);
             ids.push(existing_id);
