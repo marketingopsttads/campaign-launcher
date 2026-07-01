@@ -376,8 +376,9 @@ async function uploadVideos(urls) {
   const errors = [];
   for (const url of urls) {
     try {
-      const baseName = url.split('/').pop().replace(/\.[^.]+$/, '').slice(0, 60);
-      const video_name = `${baseName}_${Date.now()}`;
+      const baseName = url.split('/').pop().replace(/\.[^.]+$/, '').slice(0, 40);
+      const rand = Math.random().toString(36).slice(2, 8);
+      const video_name = `${baseName}_${Date.now()}_${rand}`;
       const res = await ttPost('/file/video/ad/upload/', {
         upload_type: 'UPLOAD_BY_URL',
         video_url: url,
