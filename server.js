@@ -351,9 +351,13 @@ async function createCampaign(row) {
 
 async function findExistingVideo(baseName) {
   try {
-    const res = await ttGet('/file/video/ad/search/', { keyword: baseName.slice(0, 30) });
+    // Strip leading numeric timestamp prefix (e.g. "1782895816049_") to get a searchable keyword
+    const keyword = baseName.replace(/^\d+_/, '').replace(/_/g, ' ').slice(0, 40);
+    const res = await ttGet('/file/video/ad/search/', { keyword });
     const list = res.data?.list || [];
-    const match = list.find(v => v.file_name && v.file_name.startsWith(baseName.slice(0, 30)));
+    // Match if the stored file_name contains our baseName (which was used as prefix when uploading)
+    const baseCore = baseName.replace(/^\d+_/, '').toLowerCase();
+    const match = list.find(v => v.file_name && v.file_name.toLowerCase().replace(/_/g, ' ').includes(baseCore.replace(/_/g, ' ').slice(0, 20)));
     return match?.video_id || null;
   } catch (e) {
     return null;
