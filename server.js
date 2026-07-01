@@ -345,6 +345,7 @@ async function createCampaign(row) {
     budget_mode: 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET',
     budget: row.budget,
     operation_status: 'ENABLE',
+    campaign_automation_type: 'UPGRADED_SMART_PLUS',
   };
   return ttPost('/campaign/create/', body);
 }
