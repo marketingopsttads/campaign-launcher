@@ -335,8 +335,9 @@ async function createCampaign(row) {
   const body = {
     campaign_name: row.campaign_name,
     objective_type: 'CONVERSIONS',
-    budget_mode: 'BUDGET_MODE_INFINITE',
-    budget_optimize_on: false,
+    budget_mode: 'BUDGET_MODE_DAY',
+    budget: row.budget,
+    budget_optimize_on: true,
     operation_status: 'ENABLE',
   };
   return ttPost('/campaign/create/', body);
