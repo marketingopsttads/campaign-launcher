@@ -463,50 +463,30 @@ async function createAdGroup(row, campaign_id) {
 }
 
 async function getVideoCoverImageId(video_id) {
-  // Step 1: wait until file/video/ad/info confirms the video is processed
-  let ready = false;
-  for (let i = 0; i < 24; i++) {
-    try {
-      const res = await ttGet('/file/video/ad/info/', { video_ids: JSON.stringify([video_id]) });
-      const info = res.data?.list?.[0];
-      if (info?.video_cover_url) { ready = true; break; }
-    } catch (e) {}
-    console.log(`Waiting for video ${video_id} to process (${i * 5}s)…`);
-    await new Promise(r => setTimeout(r, 5000));
-  }
-  if (!ready) { console.warn(`Video ${video_id} not ready after 2 minutes`); return null; }
-
-  // Step 2: get suggestcover frame URL (field is 'id' + 'url', not 'image_id')
-  let cover_url = null;
-  for (let attempt = 1; attempt <= 6; attempt++) {
+  // suggestcover needs 30s–5min after upload per TikTok docs; retry up to 20× (3.5min total)
+  // For reused/existing videos it works on the first call
+  for (let attempt = 1; attempt <= 20; attempt++) {
     try {
       const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
       const cover = res.data?.list?.[0];
-      if (cover?.url) { cover_url = cover.url; break; }
-      console.log(`suggestcover attempt ${attempt} empty for ${video_id}, code=${res.code}`);
+      console.log(`suggestcover attempt ${attempt} for ${video_id}: code=${res.code} cover=${JSON.stringify(cover)}`);
+      if (cover?.url) {
+        // Upload the frame URL to get an asset-library image_id required by Smart Plus ad create
+        const uploadRes = await ttPost('/file/image/ad/upload/', {
+          upload_type: 'UPLOAD_BY_URL',
+          image_url: cover.url,
+          image_name: `cover_${video_id}_${Date.now()}`,
+        });
+        const image_id = uploadRes.data?.image_id;
+        if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
+        console.warn(`Cover upload failed: code=${uploadRes.code} msg=${uploadRes.message}`);
+      }
     } catch (e) {
-      console.warn(`suggestcover attempt ${attempt} error:`, e.message);
+      console.warn(`suggestcover attempt ${attempt} error for ${video_id}:`, e.message);
     }
     await new Promise(r => setTimeout(r, 10000));
   }
-  if (!cover_url) { console.warn(`suggestcover gave no URL for ${video_id}`); return null; }
-
-  // Step 3: upload the cover frame URL to get an asset-library image_id for Smart Plus ad create
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const uploadRes = await ttPost('/file/image/ad/upload/', {
-        upload_type: 'UPLOAD_BY_URL',
-        image_url: cover_url,
-        image_name: `cover_${video_id}_${Date.now()}`,
-      });
-      const image_id = uploadRes.data?.image_id;
-      if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
-      console.warn(`Cover upload attempt ${attempt} failed: code=${uploadRes.code} msg=${uploadRes.message}`);
-    } catch (e) {
-      console.warn(`Cover upload attempt ${attempt} error:`, e.message);
-    }
-    if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
-  }
+  console.warn(`getVideoCoverImageId exhausted for ${video_id}`);
   return null;
 }
 
