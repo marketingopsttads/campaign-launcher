@@ -5,7 +5,7 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
 const app = express();
 app.use(express.json());
@@ -200,53 +200,117 @@ app.get('/api/logs', requireAuth, (req, res) => {
   res.json([...campaignLogs].reverse());
 });
 
-app.get('/sample', (req, res) => {
-  const headers = [
-    'account_name','identity_name','campaign_name','geo','budget','bid_strategy','bid_amount','targeting',
-    'start_date','start_time',
-    'video_url_1','video_url_2','video_url_3','video_url_4','video_url_5',
-    'video_url_6','video_url_7','video_url_8','video_url_9','video_url_10',
-    'headline_1','headline_2','headline_3','headline_4','headline_5',
-    'url',
-  ];
-  const rows = [
-    {
-      account_name: 'My Account Name', identity_name: 'My TikTok Identity',
-      campaign_name: 'BOZV_Jul30', geo: 'US', budget: 30,
-      bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
-      start_date: '10/07/2026', start_time: '00:00',
-      video_url_1: 'https://videosapi.net/videos/example1.mp4',
-      video_url_2: 'https://videosapi.net/videos/example2.mp4',
-      video_url_3: '', video_url_4: '', video_url_5: '',
-      video_url_6: '', video_url_7: '', video_url_8: '',
-      video_url_9: '', video_url_10: '',
-      headline_1: 'Lose weight fast', headline_2: 'Try it free today',
-      headline_3: 'Results in 7 days', headline_4: '', headline_5: '',
-      url: 'https://yoursite.com/landing',
-    },
-    {
-      account_name: 'My Account Name', identity_name: 'My TikTok Identity',
-      campaign_name: 'MT_Jul30', geo: 'US', budget: 50,
-      bid_strategy: 'COST_CAP', bid_amount: 15, targeting: 'AGE_35_PLUS',
-      start_date: '10/07/2026', start_time: '08:00',
-      video_url_1: 'https://videosapi.net/videos/example3.mp4',
-      video_url_2: '', video_url_3: '', video_url_4: '', video_url_5: '',
-      video_url_6: '', video_url_7: '', video_url_8: '',
-      video_url_9: '', video_url_10: '',
-      headline_1: 'Save more today', headline_2: 'Start saving now',
-      headline_3: '', headline_4: '', headline_5: '',
-      url: 'https://yoursite.com/offer',
-    },
+app.get('/sample', requireAuth, async (req, res) => {
+  // Fetch live account and identity names for dropdowns
+  let accountNames = [];
+  let identityNames = [];
+
+  try {
+    const url = new URL(`${TT_BASE}/oauth2/advertiser/get/`);
+    url.searchParams.set('app_id', APP_ID);
+    url.searchParams.set('secret', APP_SECRET);
+    const r = await fetch(url.toString(), { headers: { 'Access-Token': getToken() } });
+    const data = await r.json();
+    accountNames = (data.data?.list || []).map(a => a.advertiser_name);
+    if (!accountNames.length && ADV_ID) {
+      const info = await ttGet('/advertiser/info/', { fields: JSON.stringify(['advertiser_name']) });
+      const name = info.data?.list?.[0]?.advertiser_name;
+      if (name) accountNames = [name];
+    }
+  } catch (_) {}
+
+  try {
+    const data = await ttGet('/identity/get/');
+    identityNames = (data.data?.identity_list || []).map(i => i.display_name);
+  } catch (_) {}
+
+  if (!accountNames.length) accountNames = ['My Account Name'];
+  if (!identityNames.length) identityNames = ['My TikTok Identity'];
+
+  const geos = Object.keys(GEO_MAP);
+
+  const wb = new ExcelJS.Workbook();
+
+  // ── Hidden lookups sheet (source for dropdown ranges) ──
+  const lookups = wb.addWorksheet('_Lookups');
+  lookups.state = 'veryHidden';
+  accountNames.forEach((n, i) => { lookups.getCell(i + 1, 1).value = n; });
+  identityNames.forEach((n, i) => { lookups.getCell(i + 1, 2).value = n; });
+  geos.forEach((g, i) => { lookups.getCell(i + 1, 3).value = g; });
+
+  // ── Main campaigns sheet ──
+  const ws = wb.addWorksheet('Campaigns');
+
+  const HEADERS = [
+    { key: 'account_name',  label: 'account_name',  width: 28 },
+    { key: 'identity_name', label: 'identity_name',  width: 28 },
+    { key: 'campaign_name', label: 'campaign_name',  width: 30 },
+    { key: 'geo',           label: 'geo',            width: 10 },
+    { key: 'budget',        label: 'budget',         width: 10 },
+    { key: 'bid_strategy',  label: 'bid_strategy',   width: 16 },
+    { key: 'bid_amount',    label: 'bid_amount',     width: 12 },
+    { key: 'targeting',     label: 'targeting',      width: 16 },
+    { key: 'start_date',    label: 'start_date',     width: 14 },
+    { key: 'start_time',    label: 'start_time',     width: 12 },
+    ...Array.from({length:10},(_,i) => ({ key:`video_url_${i+1}`, label:`video_url_${i+1}`, width: 44 })),
+    ...Array.from({length:5}, (_,i) => ({ key:`headline_${i+1}`,  label:`headline_${i+1}`,  width: 32 })),
+    { key: 'url', label: 'url', width: 50 },
   ];
 
-  const escape = v => {
-    const s = String(v ?? '');
-    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const csv = [headers, ...rows.map(r => headers.map(h => escape(r[h])))].map(r => r.join(',')).join('\r\n');
-  res.setHeader('Content-Disposition', 'attachment; filename="campaign-template.csv"');
-  res.setHeader('Content-Type', 'text/csv');
-  res.send(csv);
+  ws.columns = HEADERS.map(h => ({ header: h.label, key: h.key, width: h.width }));
+
+  // Style header row
+  ws.getRow(1).eachCell(cell => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2d2d3f' } };
+    cell.alignment = { vertical: 'middle' };
+  });
+  ws.getRow(1).height = 20;
+
+  // Example rows
+  ws.addRow({
+    account_name: accountNames[0], identity_name: identityNames[0],
+    campaign_name: 'Example_Campaign_Jul', geo: 'US', budget: 30,
+    bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD',
+    start_date: '10/07/2026', start_time: '00:00',
+    video_url_1: 'https://videosapi.net/videos/example1.mp4',
+    headline_1: 'Your headline here', headline_2: 'Second headline',
+    url: 'https://yoursite.com/landing',
+  });
+  ws.addRow({
+    account_name: accountNames[0], identity_name: identityNames[0],
+    campaign_name: 'Example_Campaign_2_Jul', geo: 'US', budget: 50,
+    bid_strategy: 'COST_CAP', bid_amount: 0.75, targeting: 'AGE_35_PLUS',
+    start_date: '10/07/2026', start_time: '08:00',
+    video_url_1: 'https://videosapi.net/videos/example2.mp4',
+    headline_1: 'Another headline', headline_2: 'Try it today',
+    url: 'https://yoursite.com/offer',
+  });
+
+  // ── Data validation dropdowns for rows 2–500 ──
+  const DATA_ROWS = 500;
+  const colIndex = {};
+  HEADERS.forEach((h, i) => { colIndex[h.key] = i + 1; });
+
+  const acctRef   = `'_Lookups'!$A$1:$A$${accountNames.length}`;
+  const identRef  = `'_Lookups'!$B$1:$B$${identityNames.length}`;
+  const geoRef    = `'_Lookups'!$C$1:$C$${geos.length}`;
+
+  for (let row = 2; row <= DATA_ROWS + 1; row++) {
+    ws.getCell(row, colIndex.account_name).dataValidation  = { type: 'list', allowBlank: true, formulae: [acctRef] };
+    ws.getCell(row, colIndex.identity_name).dataValidation = { type: 'list', allowBlank: true, formulae: [identRef] };
+    ws.getCell(row, colIndex.geo).dataValidation           = { type: 'list', allowBlank: true, formulae: [geoRef] };
+    ws.getCell(row, colIndex.bid_strategy).dataValidation  = { type: 'list', allowBlank: true, formulae: ['"LOWEST_COST,COST_CAP"'] };
+    ws.getCell(row, colIndex.targeting).dataValidation     = { type: 'list', allowBlank: true, formulae: ['"BROAD,AGE_35_PLUS"'] };
+  }
+
+  // Freeze header row
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+  res.setHeader('Content-Disposition', 'attachment; filename="campaign-template.xlsx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  await wb.xlsx.write(res);
+  res.end();
 });
 
 app.post('/api/parse-csv', requireAuth, upload.single('csv'), (req, res) => {
