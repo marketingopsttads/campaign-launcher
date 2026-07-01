@@ -467,7 +467,7 @@ async function getVideoCoverImageId(video_id) {
   // For reused/existing videos it works on the first call
   for (let attempt = 1; attempt <= 20; attempt++) {
     try {
-      const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
+      const res = await ttGet('/file/video/suggestcover/', { video_id, poster_number: 1 });
       const cover = res.data?.list?.[0];
       console.log(`suggestcover attempt ${attempt} for ${video_id}: code=${res.code} cover=${JSON.stringify(cover)}`);
       if (cover?.url) {
