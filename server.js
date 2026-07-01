@@ -355,8 +355,8 @@ async function uploadVideos(urls) {
         flaw_detect: true,
         auto_fix_enabled: true,
       });
-      console.log('Video upload response:', JSON.stringify(res));
-      if (res.data?.video_id) ids.push(res.data.video_id);
+      const video_id = res.data?.video_id || res.data?.[0]?.video_id;
+      if (video_id) ids.push(video_id);
       else {
         const msg = `Upload failed for ${url}: code=${res.code} msg=${res.message} data=${JSON.stringify(res.data)}`;
         console.warn(msg);
