@@ -24,24 +24,75 @@ const TT_BASE = 'https://business-api.tiktok.com/open_api/v1.3';
 const ADV_ID = process.env.TIKTOK_ADVERTISER_ID;
 const PIXEL_ID = process.env.TIKTOK_PIXEL_ID;
 const BC_ID = process.env.TIKTOK_BC_ID;
-const TOKEN = process.env.TIKTOK_ACCESS_TOKEN;
+const APP_ID = process.env.TIKTOK_APP_ID;
+const APP_SECRET = process.env.TIKTOK_APP_SECRET;
+const REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI || 'https://campaigns.videosapi.net/auth/callback';
+
+// Token stored in memory — survives until restart, then re-auth needed
+let activeToken = process.env.TIKTOK_ACCESS_TOKEN || null;
+
+function getToken() { return activeToken; }
 
 async function ttGet(path, params = {}) {
   const url = new URL(`${TT_BASE}${path}`);
   url.searchParams.set('advertiser_id', ADV_ID);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v));
-  const res = await fetch(url.toString(), { headers: { 'Access-Token': TOKEN } });
+  const res = await fetch(url.toString(), { headers: { 'Access-Token': getToken() } });
   return res.json();
 }
 
 async function ttPost(path, body) {
   const res = await fetch(`${TT_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Access-Token': TOKEN, 'Content-Type': 'application/json' },
+    headers: { 'Access-Token': getToken(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ advertiser_id: ADV_ID, ...body }),
   });
   return res.json();
 }
+
+// ── TikTok OAuth ───────────────────────────────────────────────────────────
+app.get('/auth', requireAuth, (req, res) => {
+  const state = uuidv4();
+  req.session.oauthState = state;
+  const url = new URL('https://business-api.tiktok.com/portal/auth');
+  url.searchParams.set('app_id', APP_ID);
+  url.searchParams.set('state', state);
+  url.searchParams.set('redirect_uri', REDIRECT_URI);
+  res.redirect(url.toString());
+});
+
+app.get('/auth/callback', async (req, res) => {
+  const { code, state } = req.query;
+  if (!code) return res.send('<p>Auth failed — no code returned. <a href="/">Go back</a></p>');
+
+  try {
+    const r = await fetch(`${TT_BASE}/oauth2/access_token/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_id: APP_ID, secret: APP_SECRET, auth_code: code }),
+    });
+    const data = await r.json();
+    if (data.data?.access_token) {
+      activeToken = data.data.access_token;
+      console.log('TikTok token refreshed via OAuth');
+      res.redirect('/?auth=success');
+    } else {
+      res.send(`<p>Token exchange failed: ${JSON.stringify(data)}</p><a href="/">Go back</a>`);
+    }
+  } catch (e) {
+    res.send(`<p>Error: ${e.message}</p><a href="/">Go back</a>`);
+  }
+});
+
+app.get('/api/token-status', requireAuth, async (req, res) => {
+  if (!getToken()) return res.json({ valid: false, reason: 'No token set' });
+  try {
+    const data = await ttGet('/identity/get/');
+    res.json({ valid: data.code === 0, code: data.code, message: data.message });
+  } catch (e) {
+    res.json({ valid: false, reason: e.message });
+  }
+});
 
 // GeoNames ID map for TikTok location targeting
 const GEO_MAP = {

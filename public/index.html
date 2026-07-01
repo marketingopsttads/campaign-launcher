@@ -160,7 +160,10 @@
       <button class="btn-upload" id="parse-btn">Preview CSV</button>
       <a href="/sample" class="btn-upload" style="text-decoration:none;">⬇ Download Template</a>
     </div>
-    <div id="identity-error" style="color:#f87171;font-size:0.8rem;margin-bottom:16px;display:none;"></div>
+    <div id="identity-error" style="color:#f87171;font-size:0.8rem;margin-bottom:16px;display:none;">
+      <span id="identity-error-text"></span>
+      &nbsp;<a href="/auth" style="color:#6366f1;text-decoration:underline;">Re-connect TikTok →</a>
+    </div>
 
     <!-- Progress bar -->
     <div id="progress-bar-wrap">
@@ -255,7 +258,7 @@ async function loadIdentities() {
     const data = await res.json();
     if (!res.ok) {
       sel.innerHTML = '<option value="">Failed to load</option>';
-      errEl.textContent = '⚠ ' + (data.error || 'Could not load identities');
+      document.getElementById('identity-error-text').textContent = '⚠ ' + (data.error || 'Could not load identities');
       errEl.style.display = 'block';
       return;
     }
