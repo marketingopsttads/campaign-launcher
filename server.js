@@ -520,9 +520,15 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   // Smart Plus creative_list limit is 50; split if needed
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
+    const ad_configuration = {
+      identity_type: identity_type || 'CUSTOMIZED_USER',
+      identity_id,
+      ...(identity_type === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id } : {}),
+    };
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
+      ad_configuration,
       ad_text_list,
       call_to_action_list: [{ call_to_action: row.cta }],
       landing_page_url_list: [{ landing_page_url: row.url }],
