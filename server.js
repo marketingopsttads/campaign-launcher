@@ -334,8 +334,7 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
 async function createCampaign(row) {
   const body = {
     campaign_name: row.campaign_name,
-    virtual_objective_type: 'SALES',
-    sales_destination: 'WEBSITE',
+    objective_type: 'CONVERSIONS',
     budget_mode: 'BUDGET_MODE_DAY',
     budget: row.budget,
     budget_optimize_on: true,
