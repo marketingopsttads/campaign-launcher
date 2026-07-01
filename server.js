@@ -301,7 +301,10 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating campaign…' });
       const campaign = await createCampaign(row);
       const campaign_id = campaign.data?.campaign_id;
-      if (!campaign_id) throw new Error(`Campaign failed: ${JSON.stringify(campaign)}`);
+      if (!campaign_id) {
+        const msg = campaign.message || JSON.stringify(campaign);
+        throw new Error(campaign.code === 40911 || (msg && msg.includes('already')) ? `Campaign name "${row.campaign_name}" already exists in TikTok — rename it in the CSV and retry` : `Campaign failed: ${msg}`);
+      }
 
       // 2. Upload videos
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Uploading ${row.videos.length} video(s)…` });
@@ -416,7 +419,25 @@ async function createAdGroup(row, campaign_id) {
   return ttPost('/adgroup/create/', body);
 }
 
+async function getVideoCoverId(video_id) {
+  try {
+    const res = await ttGet('/file/video/suggestcover/get/', { video_id, poster_number: 1 });
+    const cover = res.data?.list?.[0];
+    if (cover?.image_id) return cover.image_id;
+  } catch (e) {
+    console.warn(`Could not fetch cover for ${video_id}:`, e.message);
+  }
+  return null;
+}
+
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id) {
+  // Pre-fetch a cover image ID for each video (required for non-Spark SINGLE_VIDEO ads)
+  const coverMap = {};
+  for (const video_id of video_ids) {
+    const cover_id = await getVideoCoverId(video_id);
+    if (cover_id) coverMap[video_id] = cover_id;
+  }
+
   const creatives = [];
   for (const video_id of video_ids) {
     for (const headline of row.headlines) {
@@ -427,7 +448,9 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
         identity_id,
         ...(identity_type === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id } : {}),
         video_id,
+        ...(coverMap[video_id] ? { image_ids: [coverMap[video_id]] } : {}),
         ad_text: headline,
+        display_name: row.campaign_name.slice(0, 40),
         call_to_action: row.cta,
         landing_page_url: row.url,
       });
@@ -438,7 +461,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   for (let i = 0; i < creatives.length; i += 20) {
     const batch = creatives.slice(i, i + 20);
     const res = await ttPost('/ad/create/', { adgroup_id, creatives: batch });
-    if (res.code !== 0) console.warn('Ad create warn:', JSON.stringify(res));
+    if (res.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(res)}`);
   }
 }
 
