@@ -376,8 +376,12 @@ async function createAdGroup(row, campaign_id) {
   const location_id = GEO_MAP[row.geo];
   if (!location_id) throw new Error(`Unknown geo: ${row.geo}`);
 
-  const schedule_start = `${row.start_date} ${(row.start_time || '00:00').padStart(5, '0')}:00`;
-  const schedule_end = `${row.end_date || '2037-12-31'} 23:59:59`;
+  // Parse time robustly: handles "8:00", "08:00", "8:00 AM", blank -> "00:00"
+  const rawTime = (row.start_time || '').toString().trim();
+  let hh = '00', mm = '00';
+  const timeMatch = rawTime.match(/(\d{1,2}):(\d{2})/);
+  if (timeMatch) { hh = timeMatch[1].padStart(2,'0'); mm = timeMatch[2]; }
+  const schedule_start = `${row.start_date} ${hh}:${mm}:00`;
 
   const body = {
     campaign_id,
@@ -385,9 +389,8 @@ async function createAdGroup(row, campaign_id) {
     placement_type: 'PLACEMENT_TYPE_AUTOMATIC',
     budget_mode: 'BUDGET_MODE_DAY',
     budget: row.budget,
-    schedule_type: 'SCHEDULE_START_END',
+    schedule_type: 'SCHEDULE_FROM_NOW',
     schedule_start_time: schedule_start,
-    schedule_end_time: schedule_end,
     optimization_goal: 'CONVERT',
     billing_event: 'OCPM',
     pacing: 'PACING_MODE_SMOOTH',
