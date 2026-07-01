@@ -304,7 +304,6 @@ async function deployRows(jobId, rows, identity_id, identity_type, identity_bc_i
       // 2. Upload videos
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: `Uploading ${row.videos.length} video(s)…` });
       const video_ids = await uploadVideos(row.videos);
-      if (!video_ids.length) throw new Error('No videos uploaded successfully');
 
       // 3. Create ad group
       jobEmit(jobId, { type: 'step', rowIndex: row.rowIndex, step: 'Creating ad group…' });
@@ -344,6 +343,7 @@ async function createCampaign(row) {
 
 async function uploadVideos(urls) {
   const ids = [];
+  const errors = [];
   for (const url of urls) {
     try {
       const res = await ttPost('/file/video/ad/upload/', {
@@ -353,11 +353,18 @@ async function uploadVideos(urls) {
         auto_fix_enabled: true,
       });
       if (res.data?.video_id) ids.push(res.data.video_id);
-      else console.warn('Video upload failed:', url, JSON.stringify(res));
+      else {
+        const msg = `Upload failed for ${url}: code=${res.code} msg=${res.message}`;
+        console.warn(msg);
+        errors.push(msg);
+      }
     } catch (e) {
-      console.warn('Video upload error:', url, e.message);
+      const msg = `Upload error for ${url}: ${e.message}`;
+      console.warn(msg);
+      errors.push(msg);
     }
   }
+  if (!ids.length) throw new Error(errors.join(' | ') || 'No videos uploaded successfully');
   return ids;
 }
 
