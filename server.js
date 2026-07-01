@@ -349,6 +349,17 @@ async function createCampaign(row) {
   return ttPost('/campaign/create/', body);
 }
 
+async function findExistingVideo(baseName) {
+  try {
+    const res = await ttGet('/file/video/ad/search/', { keyword: baseName.slice(0, 30) });
+    const list = res.data?.list || [];
+    const match = list.find(v => v.file_name && v.file_name.startsWith(baseName.slice(0, 30)));
+    return match?.video_id || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function uploadVideos(urls) {
   const ids = [];
   const errors = [];
@@ -364,8 +375,20 @@ async function uploadVideos(urls) {
         auto_fix_enabled: true,
       });
       const video_id = res.data?.video_id || res.data?.[0]?.video_id;
-      if (video_id) ids.push(video_id);
-      else {
+      if (video_id) {
+        ids.push(video_id);
+      } else if (res.code === 40911) {
+        // Video already exists in library — find and reuse it
+        const existing_id = await findExistingVideo(baseName);
+        if (existing_id) {
+          console.log(`Reusing existing video for ${url}: ${existing_id}`);
+          ids.push(existing_id);
+        } else {
+          const msg = `Upload failed (duplicate) and could not find existing video for ${url}`;
+          console.warn(msg);
+          errors.push(msg);
+        }
+      } else {
         const msg = `Upload failed for ${url}: code=${res.code} msg=${res.message} data=${JSON.stringify(res.data)}`;
         console.warn(msg);
         errors.push(msg);
