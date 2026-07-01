@@ -376,7 +376,8 @@ async function createAdGroup(row, campaign_id) {
   const location_id = GEO_MAP[row.geo];
   if (!location_id) throw new Error(`Unknown geo: ${row.geo}`);
 
-  const schedule_start = `${row.start_date} ${row.start_time}:00`;
+  const schedule_start = `${row.start_date} ${(row.start_time || '00:00').padStart(5, '0')}:00`;
+  const schedule_end = `${row.end_date || '2037-12-31'} 23:59:59`;
 
   const body = {
     campaign_id,
@@ -386,6 +387,7 @@ async function createAdGroup(row, campaign_id) {
     budget: row.budget,
     schedule_type: 'SCHEDULE_START_END',
     schedule_start_time: schedule_start,
+    schedule_end_time: schedule_end,
     optimization_goal: 'CONVERT',
     billing_event: 'OCPM',
     pacing: 'PACING_MODE_SMOOTH',
