@@ -267,9 +267,13 @@ app.get('/sample', requireAuth, async (req, res) => {
   });
   ws.getRow(1).height = 20;
 
+  // Build colIndex first so it's available for both numFmt and data validation
+  const DATA_ROWS = 500;
+  const colIndex = {};
+  HEADERS.forEach((h, i) => { colIndex[h.key] = i + 1; });
+
   // Set start_date column as date format so Excel shows a calendar picker
-  const startDateColNum = colIndex.start_date;
-  ws.getColumn(startDateColNum).numFmt = 'dd/mm/yyyy';
+  ws.getColumn(colIndex.start_date).numFmt = 'dd/mm/yyyy';
 
   const exampleDate = new Date(2026, 6, 10); // July 10 2026 (month is 0-indexed)
   ws.addRow({
@@ -292,9 +296,6 @@ app.get('/sample', requireAuth, async (req, res) => {
   });
 
   // ── Data validation dropdowns for rows 2–500 ──
-  const DATA_ROWS = 500;
-  const colIndex = {};
-  HEADERS.forEach((h, i) => { colIndex[h.key] = i + 1; });
 
   const acctRef   = `'_Lookups'!$A$1:$A$${accountNames.length}`;
   const identRef  = `'_Lookups'!$B$1:$B$${identityNames.length}`;
