@@ -479,6 +479,16 @@ async function getVideoCoverImageId(video_id) {
         });
         const image_id = uploadRes.data?.image_id;
         if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
+        if (uploadRes.code === 40911) {
+          // Image already in library (content-hash dedup) — find it by dimensions
+          console.log(`Cover image duplicate (40911), searching library for existing image…`);
+          const searchRes = await ttGet('/file/image/ad/search/', {
+            filtering: JSON.stringify({ width: cover.width || 1080, height: cover.height || 1920 }),
+            page_size: 1,
+          });
+          const existing = searchRes.data?.list?.[0];
+          if (existing?.image_id) { console.log(`Reusing existing cover image_id: ${existing.image_id}`); return existing.image_id; }
+        }
         console.warn(`Cover upload failed: code=${uploadRes.code} msg=${uploadRes.message}`);
       }
     } catch (e) {
