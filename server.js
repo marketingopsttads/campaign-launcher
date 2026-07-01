@@ -339,8 +339,11 @@ async function createCampaign(row) {
   const body = {
     campaign_name: row.campaign_name,
     objective_type: 'WEB_CONVERSIONS',
-    budget_mode: 'BUDGET_MODE_INFINITE',
-    budget_optimize_on: false,
+    virtual_objective_type: 'SALES',
+    sales_destination: 'WEBSITE',
+    budget_optimize_on: true,
+    budget_mode: 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET',
+    budget: row.budget,
     operation_status: 'ENABLE',
   };
   return ttPost('/campaign/create/', body);
@@ -399,9 +402,9 @@ async function createAdGroup(row, campaign_id) {
   const body = {
     campaign_id,
     adgroup_name: `${row.campaign_name}_adgroup`,
-    placement_type: 'PLACEMENT_TYPE_AUTOMATIC',
-    budget_mode: 'BUDGET_MODE_DYNAMIC_DAILY_BUDGET',
-    budget: row.budget,
+    placement_type: 'PLACEMENT_TYPE_NORMAL',
+    placements: ['PLACEMENT_TIKTOK'],
+    budget_mode: 'BUDGET_MODE_INFINITE',
     schedule_type: 'SCHEDULE_FROM_NOW',
     schedule_start_time: schedule_start,
     optimization_goal: 'CONVERT',
