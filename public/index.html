@@ -248,6 +248,7 @@
           <thead>
             <tr>
               <th>Time</th>
+              <th>User</th>
               <th>Account</th>
               <th>Campaign</th>
               <th>Geo</th>
@@ -261,7 +262,7 @@
             </tr>
           </thead>
           <tbody id="logs-body">
-            <tr><td colspan="11" id="logs-empty">No logs yet — deploy some campaigns to see them here.</td></tr>
+            <tr><td colspan="12" id="logs-empty">No logs yet — deploy some campaigns to see them here.</td></tr>
           </tbody>
         </table>
       </div>
@@ -523,7 +524,7 @@ async function loadLogs() {
     const res = await fetch('/api/logs');
     const logs = await res.json();
     if (!logs.length) {
-      tbody.innerHTML = '<tr><td colspan="11" id="logs-empty">No logs yet — deploy some campaigns to see them here.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12" id="logs-empty">No logs yet — deploy some campaigns to see them here.</td></tr>';
       return;
     }
     tbody.innerHTML = logs.map(l => {
@@ -538,6 +539,7 @@ async function loadLogs() {
       const errorHtml = l.error ? `<div class="log-error-text">${esc(l.error)}</div>` : '—';
       return `<tr>
         <td style="white-space:nowrap;font-size:0.75rem;color:#64748b">${esc(ts)}</td>
+        <td style="font-size:0.75rem;font-weight:500">${esc(l.deployed_by || '—')}</td>
         <td style="font-size:0.75rem">${esc(l.account_name)}</td>
         <td>${esc(l.campaign_name)}</td>
         <td>${esc(l.geo)}</td>
@@ -560,7 +562,7 @@ document.getElementById('download-logs-btn').addEventListener('click', async () 
   const logs = await res.json();
   if (!logs.length) return alert('No logs to download.');
 
-  const headers = ['timestamp','account_name','advertiser_id','campaign_name','geo','budget','bid_strategy','bid_amount','video_count','headline_count','status','campaign_id','error'];
+  const headers = ['timestamp','deployed_by','account_name','advertiser_id','campaign_name','geo','budget','bid_strategy','bid_amount','video_count','headline_count','status','campaign_id','error'];
   const escape = v => {
     const s = String(v ?? '');
     return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s;

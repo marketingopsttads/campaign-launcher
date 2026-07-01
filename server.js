@@ -5,6 +5,7 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const fs = require('fs');
 const ExcelJS = require('exceljs');
 
 const app = express();
@@ -123,9 +124,24 @@ function requireAuth(req, res, next) {
   res.status(401).json({ error: 'Unauthorized' });
 }
 
+// ── Persistent log store ───────────────────────────────────────────────────
+const LOG_PATH = process.env.LOG_PATH || path.join(__dirname, 'campaign-logs.json');
+
+function loadLogs() {
+  try {
+    if (fs.existsSync(LOG_PATH)) return JSON.parse(fs.readFileSync(LOG_PATH, 'utf8'));
+  } catch (_) {}
+  return [];
+}
+
+function appendLog(entry) {
+  const logs = loadLogs();
+  logs.push(entry);
+  try { fs.writeFileSync(LOG_PATH, JSON.stringify(logs, null, 2)); } catch (e) { console.error('Failed to write log:', e.message); }
+}
+
 // ── In-memory stores ───────────────────────────────────────────────────────
 const jobs = new Map();
-const campaignLogs = []; // persists for session lifetime
 let pixelCache = {};     // adv_id -> pixel_id
 
 function jobEmit(jobId, event) {
@@ -197,7 +213,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
 });
 
 app.get('/api/logs', requireAuth, (req, res) => {
-  res.json([...campaignLogs].reverse());
+  res.json(loadLogs().reverse());
 });
 
 app.get('/sample', requireAuth, async (req, res) => {
@@ -465,10 +481,11 @@ app.post('/api/deploy', requireAuth, async (req, res) => {
   } catch (_) {}
 
   const jobId = uuidv4();
+  const deployedBy = req.session.user || 'unknown';
   jobs.set(jobId, { events: [], clients: new Set(), status: 'running' });
   res.json({ jobId });
 
-  deployRows(jobId, rows, accountsMap || {}, identityMap).catch(console.error);
+  deployRows(jobId, rows, accountsMap || {}, identityMap, deployedBy).catch(console.error);
 });
 
 app.get('/api/deploy/:jobId/events', requireAuth, (req, res) => {
@@ -501,7 +518,7 @@ async function getPixelForAccount(adv_id) {
 }
 
 // ── Deployment logic ───────────────────────────────────────────────────────
-async function deployRows(jobId, rows, accountsMap, identityMap) {
+async function deployRows(jobId, rows, accountsMap, identityMap, deployedBy = 'unknown') {
   for (const row of rows) {
     const adv_id = accountsMap[row.account_name] || ADV_ID;
     const account_name = row.account_name || 'Default';
@@ -516,6 +533,7 @@ async function deployRows(jobId, rows, accountsMap, identityMap) {
 
     const logEntry = {
       timestamp: new Date().toISOString(),
+      deployed_by: deployedBy,
       account_name,
       advertiser_id: adv_id,
       campaign_name: row.campaign_name,
@@ -563,7 +581,7 @@ async function deployRows(jobId, rows, accountsMap, identityMap) {
       jobEmit(jobId, { type: 'row_error', rowIndex: row.rowIndex, error: err.message });
     }
 
-    campaignLogs.push(logEntry);
+    appendLog(logEntry);
   }
 
   jobEmit(jobId, { type: 'done' });
