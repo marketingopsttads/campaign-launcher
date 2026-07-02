@@ -441,9 +441,15 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
           let val;
           const cv = cell.value;
           if (cv instanceof Date) {
-            // Excel date cell → YYYY-MM-DD; treat epoch-zero (empty date cell) as blank
             if (cv.getFullYear() <= 1900) {
-              val = '';
+              // Epoch-zero date — could be a time-only cell (e.g. 15:00 stored as fraction of day)
+              const h = cv.getHours(), m = cv.getMinutes();
+              if (h > 0 || m > 0) {
+                // Has a meaningful time component — format as HH:MM
+                val = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+              } else {
+                val = '';
+              }
             } else {
               val = `${cv.getFullYear()}-${String(cv.getMonth()+1).padStart(2,'0')}-${String(cv.getDate()).padStart(2,'0')}`;
             }
