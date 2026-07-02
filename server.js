@@ -838,33 +838,32 @@ async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
 }
 
 async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
+  // Frame preference order: 5, 3, 1, 2, 4 — try each until one uploads without 40911
+  const FRAME_PREFERENCE = [5, 3, 1, 2, 4];
   for (let attempt = 1; attempt <= 20; attempt++) {
     try {
       const res = await ttGet('/file/video/suggestcover/', { video_id, poster_number: 5 }, adv_id);
       const list = res.data?.list || [];
-      const cover = list[4] || list[2] || list[0]; // prefer frame 5, fall back to frame 3, then frame 1
-      console.log(`suggestcover attempt ${attempt} for ${video_id}: code=${res.code} cover=${JSON.stringify(cover)}`);
-      if (cover?.url) {
+      console.log(`suggestcover attempt ${attempt} for ${video_id}: code=${res.code} frames=${list.length}`);
+      if (!list.length) { await new Promise(r => setTimeout(r, 10000)); continue; }
+
+      // Try each frame in preference order until one is accepted without duplicate
+      for (const frameIdx of FRAME_PREFERENCE) {
+        const cover = list[frameIdx - 1] || list[0];
+        if (!cover?.url) continue;
+        const image_name = `cover_${video_id}_f${frameIdx}_${Date.now()}`;
         const uploadRes = await ttPost('/file/image/ad/upload/', {
           upload_type: 'UPLOAD_BY_URL',
           image_url: cover.url,
-          image_name: `cover_${video_id}_${Date.now()}`,
+          image_name,
         }, adv_id);
         const image_id = uploadRes.data?.image_id;
-        if (image_id) { console.log(`Cover image_id for ${video_id}: ${image_id}`); return image_id; }
+        if (image_id) { console.log(`Cover image_id for ${video_id} frame${frameIdx}: ${image_id}`); return image_id; }
         if (uploadRes.code === 40911) {
-          // TikTok detected duplicate image — check if it returned the existing ID directly
-          const dup_image_id = uploadRes.data?.image_id;
-          if (dup_image_id) { console.log(`Reusing duplicate cover image_id for ${video_id}: ${dup_image_id}`); return dup_image_id; }
-          // Last resort: search by image URL hash to find this specific cover
-          const searchRes = await ttGet('/file/image/ad/search/', {
-            filtering: JSON.stringify({ image_name: `cover_${video_id}` }),
-            page_size: 5,
-          }, adv_id);
-          const existing = searchRes.data?.list?.[0];
-          if (existing?.image_id) { console.log(`Found cover by name for ${video_id}: ${existing.image_id}`); return existing.image_id; }
+          console.log(`Frame ${frameIdx} is a duplicate for ${video_id}, trying next frame`);
+          continue; // try the next frame instead of reusing a potentially wrong image_id
         }
-        console.warn(`Cover upload failed: code=${uploadRes.code} msg=${uploadRes.message}`);
+        console.warn(`Cover upload failed frame${frameIdx}: code=${uploadRes.code} msg=${uploadRes.message}`);
       }
     } catch (e) {
       console.warn(`suggestcover attempt ${attempt} error for ${video_id}:`, e.message);
