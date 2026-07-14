@@ -155,10 +155,27 @@ async function loadLogs() {
   return [];
 }
 
+const LOG_ARCHIVE_KEY = 'campaign-logs-archive.json';
+const LOG_MAX_ENTRIES = 2000; // archive oldest when live file exceeds this
+
 async function appendLog(entry) {
   const logs = await loadLogs();
   logs.push(entry);
-  const body = JSON.stringify(logs, null, 2);
+
+  // If live log exceeds cap, archive the oldest half to a separate key
+  if (logs.length > LOG_MAX_ENTRIES && r2) {
+    const archiveChunk = logs.splice(0, Math.floor(LOG_MAX_ENTRIES / 2));
+    try {
+      const existing = await r2Get(LOG_ARCHIVE_KEY) || [];
+      await r2.send(new PutObjectCommand({
+        Bucket: R2_BUCKET, Key: LOG_ARCHIVE_KEY,
+        Body: JSON.stringify(existing.concat(archiveChunk)),
+        ContentType: 'application/json',
+      }));
+    } catch (e) { console.error('R2 archive error:', e.message); }
+  }
+
+  const body = JSON.stringify(logs); // compact — no indentation
   if (r2) {
     try {
       await r2.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: LOG_KEY, Body: body, ContentType: 'application/json' }));
