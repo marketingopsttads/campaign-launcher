@@ -1073,6 +1073,9 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   }
 }
 
+// ── Deploy version ping ────────────────────────────────────────────────────
+app.get('/api/version', (req, res) => res.json({ version: 'a528732', reporting: true }));
+
 // ── Reporting page ─────────────────────────────────────────────────────────
 app.get('/reporting', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'reporting.html'));
