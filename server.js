@@ -943,7 +943,21 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
       image_url: row.cover_image,
       image_name: `cover_custom_${Date.now()}`,
     }, adv_id);
-    const image_id = uploadRes.data?.image_id;
+    let image_id = uploadRes.data?.image_id;
+    if (!image_id && uploadRes.code === 40911) {
+      // TikTok already has this image — reuse the existing one by searching
+      const searchRes = await ttGet('/file/image/ad/search/', { image_urls: JSON.stringify([row.cover_image]) }, adv_id);
+      image_id = searchRes.data?.list?.[0]?.image_id;
+      if (!image_id) {
+        // Fallback: retry with a unique name variation
+        const retryRes = await ttPost('/file/image/ad/upload/', {
+          upload_type: 'UPLOAD_BY_URL',
+          image_url: row.cover_image,
+          image_name: `cover_custom_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+        }, adv_id);
+        image_id = retryRes.data?.image_id;
+      }
+    }
     if (!image_id) throw new Error(`Failed to upload custom cover image: ${JSON.stringify(uploadRes)}`);
     dedupedIds.forEach(id => { coverMap[id] = image_id; });
   } else {
