@@ -954,13 +954,23 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
+  // Fetch LEARN_MORE CTA portfolio ID for this specific advertiser account
+  const portRes = await ttGet('/creative/portfolio/list/', { portfolio_type: 'CALL_TO_ACTION' }, adv_id);
+  const portfolios = portRes.data?.list || [];
+  console.log(`[CTA portfolios for ${adv_id}]:`, JSON.stringify(portfolios.map(p => ({ id: p.portfolio_id, name: p.portfolio_name, cta: p.call_to_action }))));
+  const learnMore = portfolios.find(p => p.call_to_action === 'LEARN_MORE' || p.portfolio_name?.toUpperCase().includes('LEARN'));
+  const call_to_action_id = (learnMore || portfolios[0])?.portfolio_id;
+  if (!call_to_action_id) throw new Error(
+    `No CTA portfolio found for advertiser ${adv_id}. ` +
+    `Go to TikTok Ads Manager → Creative Library → Portfolios and create a LEARN_MORE CTA portfolio for this account.`
+  );
+
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
-      ad_configuration: { ...creativeIdentity },
-      call_to_action_list: [{ call_to_action: 'LEARN_MORE' }],
+      ad_configuration: { ...creativeIdentity, call_to_action_id },
       ad_text_list,
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
