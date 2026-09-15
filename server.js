@@ -947,12 +947,13 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
     page_size: 100,
   }, adv_id);
   console.log(`CTA portfolio list (adv=${adv_id}):`, JSON.stringify(listRes));
-  const list = listRes.data?.list || [];
-  const match = list.find(p => p.call_to_action === cta || p.portfolio_name?.includes(cta));
-  if (match?.portfolio_id) {
-    console.log(`Reusing CTA portfolio ${match.portfolio_id} for ${cta}`);
-    ctaPortfolioCache[adv_id][cta] = match.portfolio_id;
-    return match.portfolio_id;
+  const list = listRes.data?.creative_portfolios || listRes.data?.list || [];
+  const match = list.find(p => p.call_to_action === cta || p.portfolio_name?.includes(cta.toLowerCase()));
+  const existingId = match?.creative_portfolio_id || match?.portfolio_id;
+  if (existingId) {
+    console.log(`Reusing CTA portfolio ${existingId} for ${cta}`);
+    ctaPortfolioCache[adv_id][cta] = existingId;
+    return existingId;
   }
 
   // 2. Create a new portfolio
@@ -974,7 +975,7 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
     }],
   }, adv_id);
   console.log(`CTA portfolio create (adv=${adv_id}, cta=${cta}):`, JSON.stringify(createRes));
-  const portfolio_id = createRes.data?.portfolio_id;
+  const portfolio_id = createRes.data?.creative_portfolio_id || createRes.data?.portfolio_id;
   if (!portfolio_id) {
     console.warn(`CTA portfolio create failed for ${cta}: ${JSON.stringify(createRes)}`);
     return null;
