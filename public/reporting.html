@@ -160,6 +160,11 @@
       <span style="color:var(--muted)">→</span>
       <input type="date" id="endDate">
     </div>
+    <select id="statusFilter">
+      <option value="ALL">All Statuses</option>
+      <option value="ACTIVE">Active only</option>
+      <option value="INACTIVE">Inactive only</option>
+    </select>
     <select id="accountSelect">
       <option value="">Loading accounts…</option>
     </select>
@@ -245,7 +250,9 @@ const state = {
   adv_id: '',
   startDate: '',
   endDate: '',
+  statusFilter: 'ALL',    // ALL | ACTIVE | INACTIVE
   rows: [],
+  allRows: [],            // unfiltered full set
   selectedIds: new Set(),
   sortKey: '',
   sortDir: 1,
@@ -275,6 +282,27 @@ function applyPreset(range) {
 document.querySelectorAll('.preset').forEach(p => p.addEventListener('click', () => applyPreset(p.dataset.range)));
 document.getElementById('startDate').addEventListener('change', e => { state.startDate = e.target.value; });
 document.getElementById('endDate').addEventListener('change', e => { state.endDate = e.target.value; });
+
+// Status filter
+document.getElementById('statusFilter').addEventListener('change', function() {
+  state.statusFilter = this.value;
+  if (state.allRows.length) {
+    state.rows = applyStatusFilter(state.allRows);
+    renderSummary(state.rows);
+    renderTable(state.level, state.rows);
+  }
+});
+
+function applyStatusFilter(rows) {
+  if (state.statusFilter === 'ALL') return rows;
+  const ACTIVE_STATUSES = new Set(['STATUS_DELIVERY_OK', 'ENABLE', 'ACTIVE', 'STATUS_ACTIVE', 'CAMPAIGN_STATUS_DELIVERY_OK']);
+  return rows.filter(r => {
+    const s = String(r.meta?.status || r.meta?.operation_status || '').toUpperCase();
+    if (state.statusFilter === 'ACTIVE') return ACTIVE_STATUSES.has(s) || s.includes('OK') || s.includes('ENABLE') || s.includes('ACTIVE');
+    if (state.statusFilter === 'INACTIVE') return !ACTIVE_STATUSES.has(s) && !s.includes('OK') && !s.includes('ENABLE') && !s.includes('ACTIVE');
+    return true;
+  });
+}
 
 // Init date
 applyPreset('today');
@@ -313,6 +341,7 @@ async function loadReport() {
   state.adv_id = document.getElementById('accountSelect').value;
   state.startDate = document.getElementById('startDate').value;
   state.endDate = document.getElementById('endDate').value;
+  state.statusFilter = document.getElementById('statusFilter').value;
   if (!state.adv_id) return toast('Select an account', 'error');
   if (!state.startDate || !state.endDate) return toast('Select a date range', 'error');
   renderBreadcrumb();
@@ -355,7 +384,8 @@ async function fetchAndRender(level) {
     if (r.status === 401) throw new Error('Session expired — please log in again.');
     const data = await r.json();
     if (data.error) throw new Error(data.error);
-    state.rows = data.rows || [];
+    state.allRows = data.rows || [];
+    state.rows = applyStatusFilter(state.allRows);
     state.sortKey = '';
     renderSummary(state.rows);
     renderTable(level, state.rows);

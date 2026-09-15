@@ -1084,18 +1084,28 @@ app.get('/reporting', requireAuth, (req, res) => {
 // ── Reporting API ──────────────────────────────────────────────────────────
 
 // GET /api/reporting/campaigns
-// Query: adv_id, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
+// Query: adv_id, start_date, end_date
+// Returns ALL campaigns (active + inactive) left-joined with reporting metrics
 app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, start_date, end_date } = req.query;
   if (!start_date || !end_date) return res.status(400).json({ error: 'start_date and end_date required' });
   try {
-    const data = await ttGet('/report/integrated/get/', {
+    // Fetch all campaigns regardless of status
+    const campList = await ttGet('/campaign/get/', {
+      fields: JSON.stringify(['campaign_id', 'campaign_name', 'status', 'budget', 'budget_mode',
+        'objective_type', 'campaign_type', 'campaign_automation_type', 'operation_status']),
+      page_size: 1000,
+    }, adv_id);
+    const campaigns = campList.data?.list || [];
+    console.log(`campaigns list: ${campaigns.length} total`);
+
+    // Fetch reporting metrics (only campaigns with activity will appear)
+    const reportData = await ttGet('/report/integrated/get/', {
       service_type: 'AUCTION',
       report_type: 'BASIC',
       data_level: 'AUCTION_CAMPAIGN',
       dimensions: JSON.stringify(['campaign_id']),
       metrics: JSON.stringify([
-        'campaign_name', 'objective_type', 'campaign_budget', 'campaign_budget_mode',
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
         'conversions', 'cost_per_conversion', 'conversion_rate',
         'video_views', 'video_play_actions', 'reach', 'frequency',
@@ -1106,21 +1116,24 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
       page: 1,
       page_size: 1000,
     }, adv_id);
-    console.log('reporting/campaigns raw:', JSON.stringify(data).slice(0, 300));
-    // Also fetch campaign list for bid strategy info
-    const campList = await ttGet('/campaign/get/', {
-      fields: JSON.stringify(['campaign_id', 'campaign_name', 'status', 'budget', 'budget_mode', 'objective_type', 'campaign_type', 'campaign_automation_type']),
-      page_size: 1000,
-    }, adv_id);
-    const campMeta = {};
-    (campList.data?.list || []).forEach(c => { campMeta[c.campaign_id] = c; });
-    const rows = (data.data?.list || []).map(r => ({
-      ...r.dimensions,
-      ...r.metrics,
-      meta: campMeta[r.dimensions?.campaign_id] || {},
+    console.log('reporting/campaigns report code:', reportData.code, 'rows:', reportData.data?.list?.length);
+
+    // Build metrics lookup keyed by campaign_id
+    const metricsMap = {};
+    (reportData.data?.list || []).forEach(r => {
+      metricsMap[r.dimensions?.campaign_id] = r.metrics || {};
+    });
+
+    // Left-join: every campaign, metrics filled in where available
+    const rows = campaigns.map(c => ({
+      campaign_id: c.campaign_id,
+      campaign_name: c.campaign_name,
+      meta: c,
+      ...(metricsMap[c.campaign_id] || {}),
     }));
     res.json({ rows });
   } catch (e) {
+    console.error('reporting/campaigns error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1131,13 +1144,23 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, campaign_id, start_date, end_date } = req.query;
   if (!campaign_id || !start_date || !end_date) return res.status(400).json({ error: 'campaign_id, start_date, end_date required' });
   try {
-    const data = await ttGet('/report/integrated/get/', {
+    // Fetch all adgroups for this campaign (all statuses)
+    const agList = await ttGet('/adgroup/get/', {
+      campaign_ids: JSON.stringify([campaign_id]),
+      fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'status', 'operation_status',
+        'budget', 'budget_mode', 'bid_type', 'bid_price', 'optimization_goal']),
+      page_size: 1000,
+    }, adv_id);
+    const adgroups = agList.data?.list || [];
+    console.log(`adgroups list for campaign ${campaign_id}: ${adgroups.length}`);
+
+    // Fetch reporting metrics
+    const reportData = await ttGet('/report/integrated/get/', {
       service_type: 'AUCTION',
       report_type: 'BASIC',
       data_level: 'AUCTION_ADGROUP',
       dimensions: JSON.stringify(['adgroup_id']),
       metrics: JSON.stringify([
-        'adgroup_name', 'campaign_id', 'campaign_name',
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
         'conversions', 'cost_per_conversion', 'conversion_rate',
         'video_views', 'video_play_actions', 'reach', 'frequency',
@@ -1149,22 +1172,22 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
       page: 1,
       page_size: 1000,
     }, adv_id);
-    console.log('reporting/adgroups raw:', JSON.stringify(data).slice(0, 300));
-    // Fetch adgroup list for bid strategy info
-    const agList = await ttGet('/adgroup/get/', {
-      campaign_ids: JSON.stringify([campaign_id]),
-      fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'status', 'budget', 'budget_mode', 'bid_type', 'bid_price', 'optimization_goal', 'pacing']),
-      page_size: 1000,
-    }, adv_id);
-    const agMeta = {};
-    (agList.data?.list || []).forEach(a => { agMeta[a.adgroup_id] = a; });
-    const rows = (data.data?.list || []).map(r => ({
-      ...r.dimensions,
-      ...r.metrics,
-      meta: agMeta[r.dimensions?.adgroup_id] || {},
+    console.log('reporting/adgroups report code:', reportData.code, 'rows:', reportData.data?.list?.length);
+
+    const metricsMap = {};
+    (reportData.data?.list || []).forEach(r => {
+      metricsMap[r.dimensions?.adgroup_id] = r.metrics || {};
+    });
+
+    const rows = adgroups.map(a => ({
+      adgroup_id: a.adgroup_id,
+      adgroup_name: a.adgroup_name,
+      meta: a,
+      ...(metricsMap[a.adgroup_id] || {}),
     }));
     res.json({ rows });
   } catch (e) {
+    console.error('reporting/adgroups error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1175,13 +1198,22 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, adgroup_id, start_date, end_date } = req.query;
   if (!adgroup_id || !start_date || !end_date) return res.status(400).json({ error: 'adgroup_id, start_date, end_date required' });
   try {
-    const data = await ttGet('/report/integrated/get/', {
+    // Fetch all ads for this adgroup (all statuses)
+    const adList = await ttGet('/ad/get/', {
+      adgroup_ids: JSON.stringify([adgroup_id]),
+      fields: JSON.stringify(['ad_id', 'ad_name', 'status', 'operation_status']),
+      page_size: 1000,
+    }, adv_id);
+    const ads = adList.data?.list || [];
+    console.log(`ads list for adgroup ${adgroup_id}: ${ads.length}`);
+
+    // Fetch reporting metrics
+    const reportData = await ttGet('/report/integrated/get/', {
       service_type: 'AUCTION',
       report_type: 'BASIC',
       data_level: 'AUCTION_AD',
       dimensions: JSON.stringify(['ad_id']),
       metrics: JSON.stringify([
-        'ad_name', 'adgroup_id', 'campaign_id',
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
         'conversions', 'cost_per_conversion', 'conversion_rate',
         'video_views', 'video_play_actions', 'reach', 'frequency',
@@ -1193,10 +1225,22 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
       page: 1,
       page_size: 1000,
     }, adv_id);
-    console.log('reporting/ads raw:', JSON.stringify(data).slice(0, 300));
-    const rows = (data.data?.list || []).map(r => ({ ...r.dimensions, ...r.metrics }));
+    console.log('reporting/ads report code:', reportData.code, 'rows:', reportData.data?.list?.length);
+
+    const metricsMap = {};
+    (reportData.data?.list || []).forEach(r => {
+      metricsMap[r.dimensions?.ad_id] = r.metrics || {};
+    });
+
+    const rows = ads.map(a => ({
+      ad_id: a.ad_id,
+      ad_name: a.ad_name,
+      meta: a,
+      ...(metricsMap[a.ad_id] || {}),
+    }));
     res.json({ rows });
   } catch (e) {
+    console.error('reporting/ads error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
