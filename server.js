@@ -34,20 +34,26 @@ let activeToken = process.env.TIKTOK_ACCESS_TOKEN || null;
 function getToken() { return activeToken; }
 
 // adv_id defaults to env ADV_ID so existing calls work unchanged
+function fetchWithTimeout(url, opts, ms = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function ttGet(path, params = {}, adv_id = ADV_ID) {
   const url = new URL(`${TT_BASE}${path}`);
   if (adv_id) url.searchParams.set('advertiser_id', adv_id);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v));
-  const res = await fetch(url.toString(), { headers: { 'Access-Token': getToken() } });
+  const res = await fetchWithTimeout(url.toString(), { headers: { 'Access-Token': getToken() } });
   return res.json();
 }
 
 async function ttPost(path, body, adv_id = ADV_ID) {
-  const res = await fetch(`${TT_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${TT_BASE}${path}`, {
     method: 'POST',
     headers: { 'Access-Token': getToken(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ advertiser_id: adv_id, ...body }),
-  });
+  }, 30000);
   return res.json();
 }
 
@@ -955,15 +961,19 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
   // Fetch LEARN_MORE CTA portfolio ID for this specific advertiser account
-  const portRes = await ttGet('/creative/portfolio/list/', { portfolio_type: 'CALL_TO_ACTION' }, adv_id);
-  const portfolios = portRes.data?.list || [];
-  console.log(`[CTA portfolios for ${adv_id}]:`, JSON.stringify(portfolios.map(p => ({ id: p.portfolio_id, name: p.portfolio_name, cta: p.call_to_action }))));
-  const learnMore = portfolios.find(p => p.call_to_action === 'LEARN_MORE' || p.portfolio_name?.toUpperCase().includes('LEARN'));
-  const call_to_action_id = (learnMore || portfolios[0])?.portfolio_id;
-  if (!call_to_action_id) throw new Error(
-    `No CTA portfolio found for advertiser ${adv_id}. ` +
-    `Go to TikTok Ads Manager → Creative Library → Portfolios and create a LEARN_MORE CTA portfolio for this account.`
-  );
+  const FALLBACK_CTA_ID = '7654255502322404372';
+  let call_to_action_id = FALLBACK_CTA_ID;
+  try {
+    const portRes = await ttGet('/creative/portfolio/list/', { portfolio_type: 'CALL_TO_ACTION' }, adv_id);
+    const portfolios = portRes.data?.list || [];
+    console.log(`[CTA portfolios for ${adv_id}]:`, JSON.stringify(portfolios.map(p => ({ id: p.portfolio_id, name: p.portfolio_name, cta: p.call_to_action }))));
+    const learnMore = portfolios.find(p => p.call_to_action === 'LEARN_MORE' || p.portfolio_name?.toUpperCase().includes('LEARN'));
+    const found = (learnMore || portfolios[0])?.portfolio_id;
+    if (found) call_to_action_id = found;
+    else console.warn(`[CTA] No portfolio found for ${adv_id}, using fallback ${FALLBACK_CTA_ID}`);
+  } catch (e) {
+    console.warn(`[CTA] Portfolio lookup failed (${e.message}), using fallback ${FALLBACK_CTA_ID}`);
+  }
 
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
