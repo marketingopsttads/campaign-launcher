@@ -385,6 +385,7 @@ app.get('/sample', requireAuth, async (req, res) => {
     ...Array.from({length:5}, (_,i) => ({ key:`headline_${i+1}`,  label:`headline_${i+1}`,  width: 32 })),
     { key: 'url', label: 'url', width: 50 },
     { key: 'cover_image', label: 'cover_image', width: 50 },
+    { key: 'cta',         label: 'cta',         width: 18 },
   ];
 
   ws.columns = HEADERS.map(h => ({ header: h.label, key: h.key, width: h.width }));
@@ -558,6 +559,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
         headlines,
         url: r.url,
         cover_image: r.cover_image?.trim() || null,
+        cta: r.cta?.trim().toUpperCase() || 'SHOP_NOW',
         language,
         validationErrors,
         status: 'pending',
@@ -1002,7 +1004,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
       ad_configuration: { ...creativeIdentity },
       ad_text_list,
-      call_to_action_list: [{ call_to_action: 'LEARN_MORE' }],
+      call_to_action_list: [{ call_to_action: row.cta || 'SHOP_NOW' }],
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
     }, adv_id);
