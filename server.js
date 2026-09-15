@@ -929,11 +929,20 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
   // call_to_action_list not supported with BC_AUTH_TT + TikTok placement; use portfolio IDs
-  const CTA_PORTFOLIO_IDS = {
-    LEARN_MORE: '7654255502322404372',
-    SHOP_NOW: '7654256510972791828',
-  };
-  const call_to_action_id = CTA_PORTFOLIO_IDS.LEARN_MORE;
+  // Fetch live portfolio IDs from TikTok API
+  let call_to_action_id;
+  try {
+    const portRes = await ttGet('/creative/portfolio/list/', { portfolio_type: 'CALL_TO_ACTION' }, adv_id);
+    const portfolios = portRes.data?.list || [];
+    const learnMore = portfolios.find(p => p.portfolio_name?.toUpperCase().includes('LEARN') || p.call_to_action?.toUpperCase().includes('LEARN'));
+    const first = portfolios[0];
+    call_to_action_id = (learnMore || first)?.portfolio_id;
+    if (!call_to_action_id) throw new Error('No CTA portfolios found');
+    console.log(`Using CTA portfolio: ${call_to_action_id} (${(learnMore || first)?.portfolio_name})`);
+  } catch (e) {
+    console.warn('CTA portfolio lookup failed, using fallback:', e.message);
+    call_to_action_id = '7654255502322404372'; // fallback
+  }
 
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
