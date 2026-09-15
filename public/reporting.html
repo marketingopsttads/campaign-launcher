@@ -351,6 +351,8 @@ async function fetchAndRender(level) {
       url = '/api/reporting/ads?' + p;
     }
     const r = await fetch(url);
+    if (r.status === 404) throw new Error('Reporting API not found — Railway may still be deploying. Wait 30s and try again.');
+    if (r.status === 401) throw new Error('Session expired — please log in again.');
     const data = await r.json();
     if (data.error) throw new Error(data.error);
     state.rows = data.rows || [];
