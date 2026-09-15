@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok Reporting</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232633;
+    --border: #2e3145;
+    --text: #e8eaf0;
+    --muted: #7a7f9a;
+    --accent: #fe2c55;
+    --accent2: #25f4ee;
+    --green: #21c55d;
+    --yellow: #f59e0b;
+    --blue: #3b82f6;
+    --radius: 8px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; }
+
+  /* Header */
+  .header { display: flex; align-items: center; gap: 16px; padding: 16px 24px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .header-logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; white-space: nowrap; }
+  .header-logo span { color: var(--text); }
+  .header-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+
+  /* Controls */
+  select, input[type=date], input[type=number], input[type=text] {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: var(--radius); font-size: 13px; outline: none;
+    transition: border-color .15s;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+  select { cursor: pointer; padding-right: 28px; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a7f9a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center; }
+
+  .btn { padding: 7px 14px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity .15s; }
+  .btn:hover { opacity: .85; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-danger { background: #ef4444; color: #fff; }
+
+  /* Date preset pills */
+  .presets { display: flex; gap: 6px; }
+  .preset { padding: 5px 10px; border-radius: 20px; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; cursor: pointer; transition: all .15s; }
+  .preset:hover, .preset.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* Breadcrumb */
+  .breadcrumb { display: flex; align-items: center; gap: 8px; padding: 12px 24px; font-size: 13px; color: var(--muted); }
+  .breadcrumb-item { cursor: pointer; color: var(--accent2); }
+  .breadcrumb-item:hover { text-decoration: underline; }
+  .breadcrumb-sep { color: var(--border); }
+  .breadcrumb-current { color: var(--text); }
+
+  /* Main content */
+  .main { padding: 0 24px 32px; }
+
+  /* Summary cards */
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat-value.green { color: var(--green); }
+  .stat-value.yellow { color: var(--yellow); }
+  .stat-value.blue { color: var(--blue); }
+
+  /* Table */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .table-toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .table-title { font-weight: 600; font-size: 14px; }
+  .table-toolbar .actions { margin-left: auto; display: flex; gap: 8px; }
+  .selected-count { font-size: 12px; color: var(--muted); }
+
+  .tbl-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: var(--surface2); padding: 10px 12px; text-align: left; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; position: sticky; top: 0;
+    border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+  thead th:hover { color: var(--text); }
+  thead th .sort-icon { margin-left: 4px; opacity: .4; }
+  thead th.sort-asc .sort-icon::after { content: '↑'; opacity: 1; }
+  thead th.sort-desc .sort-icon::after { content: '↓'; opacity: 1; }
+  thead th .sort-icon::after { content: '↕'; }
+
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  tbody tr.selected { background: rgba(254, 44, 85, .08); }
+  td { padding: 10px 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.name-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  .drill-link { color: var(--accent2); cursor: pointer; font-weight: 500; }
+  .drill-link:hover { text-decoration: underline; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .badge-active { background: rgba(33,197,93,.15); color: var(--green); }
+  .badge-paused { background: rgba(245,158,11,.15); color: var(--yellow); }
+  .badge-deleted { background: rgba(239,68,68,.15); color: #ef4444; }
+  .badge-maximize { background: rgba(59,130,246,.15); color: var(--blue); }
+  .badge-target { background: rgba(254,44,85,.15); color: var(--accent); }
+
+  /* Loading / empty */
+  .state-box { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 60px 20px; gap: 12px; color: var(--muted); font-size: 13px; }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Modal */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; width: 100%; max-width: 480px; }
+  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .modal-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  .modal-body { display: flex; flex-direction: column; gap: 14px; }
+  .field-label { font-size: 12px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
+  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  .warning-box { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); border-radius: 6px;
+    padding: 10px 14px; font-size: 12px; color: var(--yellow); }
+
+  /* Confirm step */
+  .confirm-list { background: var(--surface2); border-radius: 6px; padding: 10px 14px; max-height: 160px; overflow-y: auto; }
+  .confirm-list-item { font-size: 12px; color: var(--muted); padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .confirm-list-item:last-child { border-bottom: none; }
+
+  .toast-area { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
+  .toast { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px;
+    font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,.4); animation: slideIn .2s ease; min-width: 260px; }
+  .toast.success { border-left: 3px solid var(--green); }
+  .toast.error { border-left: 3px solid #ef4444; }
+  @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } }
+
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+  .checkbox-cell { width: 36px; }
+  input[type=checkbox] { accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-logo">TikTok<span> Reporting</span></div>
+  <div class="header-controls">
+    <div class="presets">
+      <div class="preset active" data-range="today">Today</div>
+      <div class="preset" data-range="yesterday">Yesterday</div>
+      <div class="preset" data-range="7d">Last 7d</div>
+      <div class="preset" data-range="30d">Last 30d</div>
+      <div class="preset" data-range="custom">Custom</div>
+    </div>
+    <div id="customRange" style="display:none; gap:6px; align-items:center;">
+      <input type="date" id="startDate">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="endDate">
+    </div>
+    <select id="accountSelect">
+      <option value="">Loading accounts…</option>
+    </select>
+    <button class="btn btn-primary" onclick="loadReport()">Run Report</button>
+    <a href="/" class="btn btn-secondary">← Launcher</a>
+  </div>
+</div>
+
+<!-- Breadcrumb -->
+<div class="breadcrumb" id="breadcrumb"></div>
+
+<!-- Main -->
+<div class="main">
+  <div class="summary-grid" id="summaryGrid"></div>
+  <div class="table-wrap">
+    <div class="table-toolbar">
+      <span class="table-title" id="tableTitle">Campaigns</span>
+      <span class="selected-count" id="selectedCount"></span>
+      <div class="actions" id="tableActions"></div>
+    </div>
+    <div class="tbl-scroll">
+      <div id="tableBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Bid Strategy Modal -->
+<div class="modal-overlay" id="bidModal">
+  <div class="modal">
+    <div class="modal-title">Change Bid Strategy</div>
+    <div class="modal-sub" id="bidModalSub"></div>
+    <div id="bidModalStep1">
+      <div class="modal-body">
+        <div>
+          <div class="field-label">Bid Strategy</div>
+          <select id="bidTypeSelect" style="width:100%">
+            <option value="BID_TYPE_NO_BID">Maximize Results (no bid cap)</option>
+            <option value="BID_TYPE_CUSTOM">Target Cost Per Result</option>
+          </select>
+        </div>
+        <div id="bidPriceField" style="display:none">
+          <div class="field-label">Target Cost Per Result ($)</div>
+          <input type="number" id="bidPriceInput" placeholder="e.g. 15.00" min="0.01" step="0.01" style="width:100%">
+        </div>
+        <div class="warning-box">⚠️ This will update the bid strategy for the selected ad set(s) immediately via the TikTok API.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeBidModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="showBidConfirm()">Review →</button>
+      </div>
+    </div>
+    <div id="bidModalStep2" style="display:none">
+      <div class="modal-body">
+        <div>
+          <div class="field-label">Applying to ad set(s)</div>
+          <div class="confirm-list" id="confirmList"></div>
+        </div>
+        <div>
+          <div class="field-label">Change</div>
+          <div style="font-size:13px" id="confirmChange"></div>
+        </div>
+        <div class="warning-box" style="color:#ef4444; border-color:rgba(239,68,68,.3); background:rgba(239,68,68,.08)">
+          ⛔ This action cannot be undone automatically. Confirm before proceeding.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="showBidStep1()">← Back</button>
+        <button class="btn btn-danger" onclick="applyBidStrategy()">Confirm &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast area -->
+<div class="toast-area" id="toastArea"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+  level: 'campaigns',     // campaigns | adgroups | ads
+  campaign: null,
+  adgroup: null,
+  adv_id: '',
+  startDate: '',
+  endDate: '',
+  rows: [],
+  selectedIds: new Set(),
+  sortKey: '',
+  sortDir: 1,
+};
+
+// ── Date helpers ────────────────────────────────────────────────────────────
+function fmt(d) { return d.toISOString().slice(0,10); }
+function today() { return fmt(new Date()); }
+function daysAgo(n) { const d = new Date(); d.setDate(d.getDate()-n); return fmt(d); }
+
+function applyPreset(range) {
+  document.querySelectorAll('.preset').forEach(p => p.classList.toggle('active', p.dataset.range === range));
+  const cr = document.getElementById('customRange');
+  const s = document.getElementById('startDate');
+  const e = document.getElementById('endDate');
+  if (range === 'custom') { cr.style.display = 'flex'; return; }
+  cr.style.display = 'none';
+  const t = today();
+  if (range === 'today')     { s.value = t; e.value = t; }
+  if (range === 'yesterday') { const y = daysAgo(1); s.value = y; e.value = y; }
+  if (range === '7d')        { s.value = daysAgo(6); e.value = t; }
+  if (range === '30d')       { s.value = daysAgo(29); e.value = t; }
+  state.startDate = s.value;
+  state.endDate = e.value;
+}
+
+document.querySelectorAll('.preset').forEach(p => p.addEventListener('click', () => applyPreset(p.dataset.range)));
+document.getElementById('startDate').addEventListener('change', e => { state.startDate = e.target.value; });
+document.getElementById('endDate').addEventListener('change', e => { state.endDate = e.target.value; });
+
+// Init date
+applyPreset('today');
+
+// ── Accounts ────────────────────────────────────────────────────────────────
+async function loadAccounts() {
+  try {
+    const r = await fetch('/api/accounts');
+    const data = await r.json();
+    const sel = document.getElementById('accountSelect');
+    sel.innerHTML = '';
+    const accounts = data.accounts || [];
+    if (!accounts.length) {
+      sel.innerHTML = '<option value="">No accounts</option>';
+      return;
+    }
+    accounts.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.name;
+      sel.appendChild(opt);
+    });
+    state.adv_id = sel.value;
+    sel.addEventListener('change', () => { state.adv_id = sel.value; });
+  } catch(e) {
+    document.getElementById('accountSelect').innerHTML = '<option>Error loading</option>';
+  }
+}
+
+// ── Load report ─────────────────────────────────────────────────────────────
+async function loadReport() {
+  state.level = 'campaigns';
+  state.campaign = null;
+  state.adgroup = null;
+  state.selectedIds.clear();
+  state.adv_id = document.getElementById('accountSelect').value;
+  state.startDate = document.getElementById('startDate').value;
+  state.endDate = document.getElementById('endDate').value;
+  if (!state.adv_id) return toast('Select an account', 'error');
+  if (!state.startDate || !state.endDate) return toast('Select a date range', 'error');
+  renderBreadcrumb();
+  await fetchAndRender('campaigns');
+}
+
+async function drillAdgroups(campaign) {
+  state.level = 'adgroups';
+  state.campaign = campaign;
+  state.adgroup = null;
+  state.selectedIds.clear();
+  renderBreadcrumb();
+  await fetchAndRender('adgroups');
+}
+
+async function drillAds(adgroup) {
+  state.level = 'ads';
+  state.adgroup = adgroup;
+  state.selectedIds.clear();
+  renderBreadcrumb();
+  await fetchAndRender('ads');
+}
+
+async function fetchAndRender(level) {
+  showLoading();
+  try {
+    let url, rows;
+    const p = new URLSearchParams({ adv_id: state.adv_id, start_date: state.startDate, end_date: state.endDate });
+    if (level === 'campaigns') {
+      url = '/api/reporting/campaigns?' + p;
+    } else if (level === 'adgroups') {
+      p.set('campaign_id', state.campaign.campaign_id);
+      url = '/api/reporting/adgroups?' + p;
+    } else {
+      p.set('adgroup_id', state.adgroup.adgroup_id);
+      url = '/api/reporting/ads?' + p;
+    }
+    const r = await fetch(url);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    state.rows = data.rows || [];
+    state.sortKey = '';
+    renderSummary(state.rows);
+    renderTable(level, state.rows);
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ── Breadcrumb ──────────────────────────────────────────────────────────────
+function renderBreadcrumb() {
+  const bc = document.getElementById('breadcrumb');
+  const parts = [];
+  if (state.level === 'campaigns') {
+    parts.push('<span class="breadcrumb-current">All Campaigns</span>');
+  } else if (state.level === 'adgroups') {
+    parts.push(`<span class="breadcrumb-item" onclick="loadReport()">All Campaigns</span>`);
+    parts.push('<span class="breadcrumb-sep">/</span>');
+    parts.push(`<span class="breadcrumb-current">${esc(state.campaign.campaign_name || state.campaign.campaign_id)}</span>`);
+  } else {
+    parts.push(`<span class="breadcrumb-item" onclick="loadReport()">All Campaigns</span>`);
+    parts.push('<span class="breadcrumb-sep">/</span>');
+    parts.push(`<span class="breadcrumb-item" onclick="drillAdgroups(state.campaign)">${esc(state.campaign.campaign_name || state.campaign.campaign_id)}</span>`);
+    parts.push('<span class="breadcrumb-sep">/</span>');
+    parts.push(`<span class="breadcrumb-current">${esc(state.adgroup.adgroup_name || state.adgroup.adgroup_id)}</span>`);
+  }
+  bc.innerHTML = parts.join('');
+}
+
+// ── Summary cards ────────────────────────────────────────────────────────────
+function renderSummary(rows) {
+  const grid = document.getElementById('summaryGrid');
+  if (!rows.length) { grid.innerHTML = ''; return; }
+  const sum = (k) => rows.reduce((a,r) => a + (parseFloat(r[k]) || 0), 0);
+  const avg = (k) => rows.length ? sum(k) / rows.length : 0;
+  const fmtDollar = v => '$' + v.toFixed(2);
+  const fmtPct = v => (v*100).toFixed(2) + '%';
+  const fmtNum = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(1)+'K' : v.toFixed(0);
+  const cards = [
+    { label: 'Spend', value: fmtDollar(sum('spend')), cls: 'yellow' },
+    { label: 'Impressions', value: fmtNum(sum('impressions')), cls: '' },
+    { label: 'Clicks', value: fmtNum(sum('clicks')), cls: '' },
+    { label: 'CTR', value: fmtPct(avg('ctr')), cls: 'blue' },
+    { label: 'CPM', value: fmtDollar(avg('cpm')), cls: '' },
+    { label: 'CPC', value: fmtDollar(avg('cpc')), cls: '' },
+    { label: 'Conversions', value: fmtNum(sum('conversions')), cls: 'green' },
+    { label: 'CPA', value: fmtDollar(avg('cost_per_conversion')), cls: '' },
+    { label: 'Reach', value: fmtNum(sum('reach')), cls: '' },
+  ];
+  grid.innerHTML = cards.map(c =>
+    `<div class="stat-card"><div class="stat-label">${c.label}</div><div class="stat-value ${c.cls}">${c.value}</div></div>`
+  ).join('');
+}
+
+// ── Table ────────────────────────────────────────────────────────────────────
+const COLS_CAMPAIGNS = [
+  { key: 'campaign_name', label: 'Campaign', drill: true },
+  { key: 'status', label: 'Status', render: 'status' },
+  { key: 'bid_strategy', label: 'Bid Strategy', render: 'bidStrategy' },
+  { key: 'spend', label: 'Spend', fmt: 'dollar' },
+  { key: 'impressions', label: 'Impressions', fmt: 'num' },
+  { key: 'clicks', label: 'Clicks', fmt: 'num' },
+  { key: 'ctr', label: 'CTR', fmt: 'pct' },
+  { key: 'cpm', label: 'CPM', fmt: 'dollar' },
+  { key: 'cpc', label: 'CPC', fmt: 'dollar' },
+  { key: 'conversions', label: 'Conversions', fmt: 'num' },
+  { key: 'cost_per_conversion', label: 'CPA', fmt: 'dollar' },
+  { key: 'result', label: 'Results', fmt: 'num' },
+  { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
+  { key: 'reach', label: 'Reach', fmt: 'num' },
+  { key: 'frequency', label: 'Frequency', fmt: 'num2' },
+  { key: 'video_views', label: 'Video Views', fmt: 'num' },
+];
+
+const COLS_ADGROUPS = [
+  { key: 'adgroup_name', label: 'Ad Set', drill: true },
+  { key: 'status', label: 'Status', render: 'status' },
+  { key: 'bid_strategy', label: 'Bid Strategy', render: 'bidStrategy' },
+  { key: 'bid_price', label: 'Bid Price', fmt: 'dollar' },
+  { key: 'spend', label: 'Spend', fmt: 'dollar' },
+  { key: 'impressions', label: 'Impressions', fmt: 'num' },
+  { key: 'clicks', label: 'Clicks', fmt: 'num' },
+  { key: 'ctr', label: 'CTR', fmt: 'pct' },
+  { key: 'cpm', label: 'CPM', fmt: 'dollar' },
+  { key: 'cpc', label: 'CPC', fmt: 'dollar' },
+  { key: 'conversions', label: 'Conversions', fmt: 'num' },
+  { key: 'cost_per_conversion', label: 'CPA', fmt: 'dollar' },
+  { key: 'result', label: 'Results', fmt: 'num' },
+  { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
+  { key: 'reach', label: 'Reach', fmt: 'num' },
+  { key: 'video_views', label: 'Video Views', fmt: 'num' },
+];
+
+const COLS_ADS = [
+  { key: 'ad_name', label: 'Ad Name' },
+  { key: 'status', label: 'Status', render: 'status' },
+  { key: 'spend', label: 'Spend', fmt: 'dollar' },
+  { key: 'impressions', label: 'Impressions', fmt: 'num' },
+  { key: 'clicks', label: 'Clicks', fmt: 'num' },
+  { key: 'ctr', label: 'CTR', fmt: 'pct' },
+  { key: 'cpm', label: 'CPM', fmt: 'dollar' },
+  { key: 'cpc', label: 'CPC', fmt: 'dollar' },
+  { key: 'conversions', label: 'Conversions', fmt: 'num' },
+  { key: 'cost_per_conversion', label: 'CPA', fmt: 'dollar' },
+  { key: 'result', label: 'Results', fmt: 'num' },
+  { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
+  { key: 'reach', label: 'Reach', fmt: 'num' },
+  { key: 'video_views', label: 'Video Views', fmt: 'num' },
+];
+
+function getCols(level) {
+  return level === 'campaigns' ? COLS_CAMPAIGNS : level === 'adgroups' ? COLS_ADGROUPS : COLS_ADS;
+}
+
+function fmtCell(row, col) {
+  const v = row[col.key] ?? row.meta?.[col.key] ?? '';
+  if (col.render === 'status') {
+    const s = String(v || row.meta?.status || '').toUpperCase();
+    const cls = s === 'ENABLE' || s === 'ACTIVE' ? 'badge-active' : s === 'DISABLE' || s === 'PAUSED' ? 'badge-paused' : 'badge-deleted';
+    return `<span class="badge ${cls}">${s || '—'}</span>`;
+  }
+  if (col.render === 'bidStrategy') {
+    const bt = row.meta?.bid_type || '';
+    if (bt === 'BID_TYPE_NO_BID') return `<span class="badge badge-maximize">Maximize</span>`;
+    if (bt === 'BID_TYPE_CUSTOM') return `<span class="badge badge-target">Target CPA</span>`;
+    return `<span style="color:var(--muted)">—</span>`;
+  }
+  const n = parseFloat(v);
+  if (col.fmt === 'dollar') return isNaN(n) || n === 0 ? '—' : '$' + n.toFixed(2);
+  if (col.fmt === 'pct')    return isNaN(n) || n === 0 ? '—' : (n*100).toFixed(2) + '%';
+  if (col.fmt === 'num')    return isNaN(n) || n === 0 ? '—' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : n.toFixed(0);
+  if (col.fmt === 'num2')   return isNaN(n) ? '—' : n.toFixed(2);
+  return esc(String(v || '—'));
+}
+
+function sortRows(rows, key, dir) {
+  return [...rows].sort((a,b) => {
+    const av = parseFloat(a[key]) || a[key] || '';
+    const bv = parseFloat(b[key]) || b[key] || '';
+    if (av < bv) return -dir;
+    if (av > bv) return dir;
+    return 0;
+  });
+}
+
+function renderTable(level, rows) {
+  const title = level === 'campaigns' ? 'Campaigns' : level === 'adgroups' ? 'Ad Sets' : 'Ads';
+  document.getElementById('tableTitle').textContent = title;
+  const cols = getCols(level);
+  const idKey = level === 'campaigns' ? 'campaign_id' : level === 'adgroups' ? 'adgroup_id' : 'ad_id';
+  const nameKey = level === 'campaigns' ? 'campaign_name' : level === 'adgroups' ? 'adgroup_name' : 'ad_name';
+  const showCheckbox = level === 'adgroups';
+
+  if (!rows.length) {
+    document.getElementById('tableBody').innerHTML = '<div class="state-box"><div>No data for this period</div></div>';
+    updateToolbar(level, 0);
+    return;
+  }
+
+  const allIds = rows.map(r => r[idKey]);
+
+  const head = `<thead><tr>
+    ${showCheckbox ? `<th class="checkbox-cell"><input type="checkbox" id="checkAll" onchange="toggleAll(this, ${JSON.stringify(allIds)})"></th>` : ''}
+    ${cols.map(c => `<th onclick="doSort('${c.key}')" data-key="${c.key}"><span>${c.label}</span><span class="sort-icon"></span></th>`).join('')}
+  </tr></thead>`;
+
+  const body = rows.map(row => {
+    const id = row[idKey];
+    const name = row[nameKey] || row[`meta.${nameKey}`] || id;
+    return `<tr class="${state.selectedIds.has(id) ? 'selected' : ''}" data-id="${id}">
+      ${showCheckbox ? `<td class="checkbox-cell"><input type="checkbox" ${state.selectedIds.has(id) ? 'checked' : ''} onchange="toggleRow('${id}', this)"></td>` : ''}
+      ${cols.map(c => {
+        if (c.drill) {
+          const drillFn = level === 'campaigns' ? `drillAdgroups(${JSON.stringify(row)})` : `drillAds(${JSON.stringify(row)})`;
+          return `<td class="name-cell"><span class="drill-link" onclick="${drillFn}" title="${esc(String(row[c.key] || id))}">${esc(String(row[c.key] || id))}</span></td>`;
+        }
+        return `<td>${fmtCell(row, c)}</td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tableBody').innerHTML = `<table>${head}<tbody>${body}</tbody></table>`;
+  updateToolbar(level, rows.length);
+  updateSortUI();
+}
+
+function doSort(key) {
+  if (state.sortKey === key) state.sortDir *= -1;
+  else { state.sortKey = key; state.sortDir = -1; }
+  state.rows = sortRows(state.rows, key, state.sortDir);
+  renderTable(state.level, state.rows);
+}
+
+function updateSortUI() {
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.key === state.sortKey) {
+      th.classList.add(state.sortDir === 1 ? 'sort-asc' : 'sort-desc');
+    }
+  });
+}
+
+function toggleAll(cb, ids) {
+  if (cb.checked) ids.forEach(id => state.selectedIds.add(id));
+  else state.selectedIds.clear();
+  document.querySelectorAll('tbody input[type=checkbox]').forEach(c => { c.checked = cb.checked; });
+  document.querySelectorAll('tbody tr[data-id]').forEach(tr => { tr.classList.toggle('selected', cb.checked); });
+  updateSelCount();
+}
+
+function toggleRow(id, cb) {
+  if (cb.checked) state.selectedIds.add(id);
+  else state.selectedIds.delete(id);
+  cb.closest('tr').classList.toggle('selected', cb.checked);
+  const allCb = document.getElementById('checkAll');
+  if (allCb) allCb.indeterminate = state.selectedIds.size > 0 && state.selectedIds.size < state.rows.length;
+  updateSelCount();
+}
+
+function updateSelCount() {
+  const n = state.selectedIds.size;
+  document.getElementById('selectedCount').textContent = n > 0 ? `${n} selected` : '';
+}
+
+function updateToolbar(level, count) {
+  const actions = document.getElementById('tableActions');
+  actions.innerHTML = '';
+  if (level === 'adgroups') {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary btn-sm';
+    btn.textContent = '⚙ Change Bid Strategy';
+    btn.onclick = openBidModal;
+    actions.appendChild(btn);
+  }
+}
+
+// ── Bid Strategy Modal ───────────────────────────────────────────────────────
+document.getElementById('bidTypeSelect').addEventListener('change', function() {
+  document.getElementById('bidPriceField').style.display = this.value === 'BID_TYPE_CUSTOM' ? 'block' : 'none';
+});
+
+function openBidModal() {
+  if (!state.selectedIds.size) return toast('Select at least one ad set', 'error');
+  const n = state.selectedIds.size;
+  document.getElementById('bidModalSub').textContent = `${n} ad set${n>1?'s':''} selected`;
+  document.getElementById('bidTypeSelect').value = 'BID_TYPE_NO_BID';
+  document.getElementById('bidPriceField').style.display = 'none';
+  document.getElementById('bidPriceInput').value = '';
+  showBidStep1();
+  document.getElementById('bidModal').classList.add('open');
+}
+
+function closeBidModal() { document.getElementById('bidModal').classList.remove('open'); }
+
+function showBidStep1() {
+  document.getElementById('bidModalStep1').style.display = 'block';
+  document.getElementById('bidModalStep2').style.display = 'none';
+}
+
+function showBidConfirm() {
+  const bt = document.getElementById('bidTypeSelect').value;
+  const bp = document.getElementById('bidPriceInput').value;
+  if (bt === 'BID_TYPE_CUSTOM' && (!bp || parseFloat(bp) <= 0)) {
+    return toast('Enter a valid bid price', 'error');
+  }
+  const selectedRows = state.rows.filter(r => state.selectedIds.has(r.adgroup_id));
+  document.getElementById('confirmList').innerHTML = selectedRows.map(r =>
+    `<div class="confirm-list-item">${esc(r.adgroup_name || r.adgroup_id)}</div>`
+  ).join('');
+  const stratName = bt === 'BID_TYPE_NO_BID' ? 'Maximize Results' : `Target CPA — $${parseFloat(bp).toFixed(2)}`;
+  document.getElementById('confirmChange').innerHTML = `<strong>${stratName}</strong>`;
+  document.getElementById('bidModalStep1').style.display = 'none';
+  document.getElementById('bidModalStep2').style.display = 'block';
+}
+
+async function applyBidStrategy() {
+  const bt = document.getElementById('bidTypeSelect').value;
+  const bp = document.getElementById('bidPriceInput').value;
+  const adgroup_ids = [...state.selectedIds];
+  closeBidModal();
+  try {
+    const r = await fetch('/api/reporting/bid-strategy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adv_id: state.adv_id, adgroup_ids, bid_type: bt, bid_price: bp || null }),
+    });
+    const data = await r.json();
+    const ok = data.results?.filter(x => x.ok).length || 0;
+    const fail = data.results?.filter(x => !x.ok).length || 0;
+    if (fail === 0) toast(`✓ Updated ${ok} ad set${ok>1?'s':''}`, 'success');
+    else toast(`${ok} updated, ${fail} failed`, 'error');
+    // Refresh
+    await fetchAndRender('adgroups');
+  } catch(e) {
+    toast('Request failed: ' + e.message, 'error');
+  }
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function showLoading() {
+  document.getElementById('summaryGrid').innerHTML = '';
+  document.getElementById('tableBody').innerHTML = '<div class="state-box"><div class="spinner"></div><div>Loading…</div></div>';
+  document.getElementById('selectedCount').textContent = '';
+  document.getElementById('tableActions').innerHTML = '';
+}
+
+function showError(msg) {
+  document.getElementById('tableBody').innerHTML = `<div class="state-box"><div style="color:#ef4444">⚠ ${esc(msg)}</div></div>`;
+}
+
+function toast(msg, type = 'success') {
+  const area = document.getElementById('toastArea');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  area.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// Close modal on overlay click
+document.getElementById('bidModal').addEventListener('click', function(e) {
+  if (e.target === this) closeBidModal();
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadAccounts().then(() => {
+  // Auto-run report on load
+  setTimeout(loadReport, 200);
+});
+</script>
+</body>
+</html>

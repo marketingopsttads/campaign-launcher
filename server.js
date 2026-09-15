@@ -1073,6 +1073,141 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   }
 }
 
+// ── Reporting page ─────────────────────────────────────────────────────────
+app.get('/reporting', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'reporting.html'));
+});
+
+// ── Reporting API ──────────────────────────────────────────────────────────
+
+// GET /api/reporting/campaigns
+// Query: adv_id, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
+app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, start_date, end_date } = req.query;
+  if (!start_date || !end_date) return res.status(400).json({ error: 'start_date and end_date required' });
+  try {
+    const data = await ttGet('/reports/integrated/get/', {
+      report_type: 'BASIC',
+      dimensions: JSON.stringify(['campaign_id']),
+      metrics: JSON.stringify([
+        'campaign_name', 'objective_type', 'campaign_budget', 'campaign_budget_mode',
+        'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
+        'conversions', 'cost_per_conversion', 'conversion_rate',
+        'video_views', 'video_play_actions', 'reach', 'frequency',
+        'result', 'cost_per_result', 'result_rate',
+      ]),
+      start_date,
+      end_date,
+      page: 1,
+      page_size: 1000,
+    }, adv_id);
+    // Also fetch campaign list for bid strategy info
+    const campList = await ttGet('/campaign/get/', {
+      fields: JSON.stringify(['campaign_id', 'campaign_name', 'status', 'budget', 'budget_mode', 'objective_type', 'campaign_type', 'campaign_automation_type']),
+      page_size: 1000,
+    }, adv_id);
+    const campMeta = {};
+    (campList.data?.list || []).forEach(c => { campMeta[c.campaign_id] = c; });
+    const rows = (data.data?.list || []).map(r => ({
+      ...r.dimensions,
+      ...r.metrics,
+      meta: campMeta[r.dimensions?.campaign_id] || {},
+    }));
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/reporting/adgroups
+// Query: adv_id, campaign_id, start_date, end_date
+app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, campaign_id, start_date, end_date } = req.query;
+  if (!campaign_id || !start_date || !end_date) return res.status(400).json({ error: 'campaign_id, start_date, end_date required' });
+  try {
+    const data = await ttGet('/reports/integrated/get/', {
+      report_type: 'BASIC',
+      dimensions: JSON.stringify(['adgroup_id']),
+      metrics: JSON.stringify([
+        'adgroup_name', 'campaign_id', 'campaign_name', 'status',
+        'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
+        'conversions', 'cost_per_conversion', 'conversion_rate',
+        'video_views', 'video_play_actions', 'reach', 'frequency',
+        'result', 'cost_per_result', 'result_rate',
+      ]),
+      filtering: JSON.stringify([{ field_name: 'campaign_id', filter_type: 'IN', filter_value: JSON.stringify([campaign_id]) }]),
+      start_date,
+      end_date,
+      page: 1,
+      page_size: 1000,
+    }, adv_id);
+    // Fetch adgroup list for bid strategy info
+    const agList = await ttGet('/adgroup/get/', {
+      campaign_ids: JSON.stringify([campaign_id]),
+      fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'status', 'budget', 'budget_mode', 'bid_type', 'bid_price', 'optimization_goal', 'pacing']),
+      page_size: 1000,
+    }, adv_id);
+    const agMeta = {};
+    (agList.data?.list || []).forEach(a => { agMeta[a.adgroup_id] = a; });
+    const rows = (data.data?.list || []).map(r => ({
+      ...r.dimensions,
+      ...r.metrics,
+      meta: agMeta[r.dimensions?.adgroup_id] || {},
+    }));
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/reporting/ads
+// Query: adv_id, adgroup_id, start_date, end_date
+app.get('/api/reporting/ads', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, adgroup_id, start_date, end_date } = req.query;
+  if (!adgroup_id || !start_date || !end_date) return res.status(400).json({ error: 'adgroup_id, start_date, end_date required' });
+  try {
+    const data = await ttGet('/reports/integrated/get/', {
+      report_type: 'BASIC',
+      dimensions: JSON.stringify(['ad_id']),
+      metrics: JSON.stringify([
+        'ad_name', 'adgroup_id', 'campaign_id', 'status',
+        'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
+        'conversions', 'cost_per_conversion', 'conversion_rate',
+        'video_views', 'video_play_actions', 'reach', 'frequency',
+        'result', 'cost_per_result', 'result_rate',
+      ]),
+      filtering: JSON.stringify([{ field_name: 'adgroup_id', filter_type: 'IN', filter_value: JSON.stringify([adgroup_id]) }]),
+      start_date,
+      end_date,
+      page: 1,
+      page_size: 1000,
+    }, adv_id);
+    const rows = (data.data?.list || []).map(r => ({ ...r.dimensions, ...r.metrics }));
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/reporting/bid-strategy
+// Body: { adv_id, adgroup_ids: [...], bid_type, bid_price (optional) }
+app.post('/api/reporting/bid-strategy', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, adgroup_ids, bid_type, bid_price } = req.body;
+  if (!adgroup_ids?.length || !bid_type) return res.status(400).json({ error: 'adgroup_ids and bid_type required' });
+  const results = [];
+  for (const adgroup_id of adgroup_ids) {
+    try {
+      const body = { adgroup_id, bid_type };
+      if (bid_price !== undefined && bid_price !== null && bid_price !== '') body.bid_price = Number(bid_price);
+      const r = await ttPost('/adgroup/update/', body, adv_id);
+      results.push({ adgroup_id, ok: r.code === 0, code: r.code, message: r.message });
+    } catch (e) {
+      results.push({ adgroup_id, ok: false, message: e.message });
+    }
+  }
+  res.json({ results });
+});
+
 // ── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Campaign launcher running at http://localhost:${PORT}`));
