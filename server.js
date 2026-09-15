@@ -573,10 +573,18 @@ app.post('/api/deploy', requireAuth, async (req, res) => {
 
   const jobId = uuidv4();
   const deployedBy = req.session.user || 'unknown';
-  jobs.set(jobId, { events: [], clients: new Set(), status: 'running' });
+  jobs.set(jobId, { events: [], clients: new Set(), status: 'running', paused: false });
   res.json({ jobId });
 
   deployRows(jobId, rows, accountsMap || {}, identityMap, deployedBy).catch(console.error);
+});
+
+app.post('/api/deploy/:jobId/pause', requireAuth, (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  job.paused = !job.paused;
+  jobEmit(req.params.jobId, { type: job.paused ? 'paused' : 'resumed' });
+  res.json({ paused: job.paused });
 });
 
 app.get('/api/deploy/:jobId/events', requireAuth, (req, res) => {
@@ -611,6 +619,14 @@ async function getPixelForAccount(adv_id) {
 // ── Deployment logic ───────────────────────────────────────────────────────
 async function deployRows(jobId, rows, accountsMap, identityMap, deployedBy = 'unknown') {
   for (const row of rows) {
+    // Wait while paused
+    const job = jobs.get(jobId);
+    if (job) {
+      while (job.paused) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
     const adv_id = accountsMap[row.account_name] || ADV_ID;
     const account_name = row.account_name || 'Default';
 

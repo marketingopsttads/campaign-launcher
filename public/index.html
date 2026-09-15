@@ -120,9 +120,16 @@
 
     /* ── Progress bar ── */
     #progress-bar-wrap { display: none; margin-bottom: 20px; }
-    .progress-label { font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px; display: flex; justify-content: space-between; }
+    .progress-label { font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
     .progress-track { height: 6px; background: #2d2d3f; border-radius: 9999px; overflow: hidden; }
     .progress-fill { height: 100%; background: #6366f1; border-radius: 9999px; width: 0%; transition: width 0.3s; }
+    #pause-btn {
+      background: #78350f; color: #fbbf24; border: none; border-radius: 6px;
+      padding: 4px 12px; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: background 0.15s; white-space: nowrap;
+    }
+    #pause-btn:hover { background: #92400e; }
+    #pause-btn.paused { background: #14532d; color: #4ade80; }
+    #pause-btn.paused:hover { background: #166534; }
 
     /* ── Logs tab ── */
     .logs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
@@ -201,7 +208,10 @@
       <div id="progress-bar-wrap">
         <div class="progress-label">
           <span id="progress-label-text">Deploying…</span>
-          <span id="progress-label-pct">0%</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span id="progress-label-pct">0%</span>
+            <button id="pause-btn" onclick="togglePause()">⏸ Pause</button>
+          </div>
         </div>
         <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
       </div>
@@ -275,6 +285,12 @@
 let parsedRows = [];
 let accounts = [];
 let deploying = false;
+let currentJobId = null;
+
+async function togglePause() {
+  if (!currentJobId) return;
+  await fetch(`/api/deploy/${currentJobId}/pause`, { method: 'POST' });
+}
 const GEO_MAP_KEYS = new Set(['US','GB','UK','AU','CA','DE','FR','MX','BR','IN','JP','SG','PH','ID','TH','MY','VN','ZA','NG','KE','AE','SA','NZ','IT','ES','NL','SE','NO','DK','FI','PL','TR','AR','CO','CL','PE','EG','MA','GH','TZ','UA','RO','HU','CZ','GR','PT','BE','AT','CH','IL','KR','TW','HK','PK','BD']);
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
@@ -467,9 +483,13 @@ document.getElementById('deploy-btn').addEventListener('click', async () => {
   if (!confirm(`Deploy ${parsedRows.length} campaign(s) to TikTok?`)) return;
 
   deploying = true;
+  currentJobId = null;
   document.getElementById('deploy-btn').disabled = true;
   document.getElementById('parse-btn').disabled = true;
   document.getElementById('progress-bar-wrap').style.display = 'block';
+  const pauseBtn = document.getElementById('pause-btn');
+  pauseBtn.textContent = '⏸ Pause';
+  pauseBtn.classList.remove('paused');
 
   const accountsMap = getAccountsMap();
 
@@ -482,6 +502,7 @@ document.getElementById('deploy-btn').addEventListener('click', async () => {
   let done = 0;
   const total = parsedRows.length;
 
+  currentJobId = jobId;
   const evtSource = new EventSource(`/api/deploy/${jobId}/events`);
   evtSource.onmessage = e => {
     const ev = JSON.parse(e.data);
@@ -500,11 +521,23 @@ document.getElementById('deploy-btn').addEventListener('click', async () => {
       done++;
       updateRowStatus(ev.rowIndex, { status: 'error', error: ev.error });
       setProgress(done, total);
+    } else if (ev.type === 'paused') {
+      const pb = document.getElementById('pause-btn');
+      pb.textContent = '▶ Resume';
+      pb.classList.add('paused');
+      document.getElementById('progress-label-text').textContent = 'Paused — waiting after current campaign…';
+    } else if (ev.type === 'resumed') {
+      const pb = document.getElementById('pause-btn');
+      pb.textContent = '⏸ Pause';
+      pb.classList.remove('paused');
+      document.getElementById('progress-label-text').textContent = `${done} / ${total} campaigns`;
     } else if (ev.type === 'done') {
       evtSource.close();
       deploying = false;
+      currentJobId = null;
       document.getElementById('deploy-btn').disabled = false;
       document.getElementById('parse-btn').disabled = false;
+      document.getElementById('pause-btn').style.display = 'none';
       document.getElementById('progress-label-text').textContent = 'Deployment complete';
     }
   };
