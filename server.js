@@ -559,7 +559,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
         headlines,
         url: r.url,
         cover_image: r.cover_image?.trim() || null,
-        cta: r.cta?.trim().toUpperCase() || 'SHOP_NOW',
+        cta: r.cta?.trim().toUpperCase() || 'LEARN_MORE',
         language,
         validationErrors,
         status: 'pending',
@@ -956,12 +956,22 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
   }
 
   // 2. Create a new portfolio
+  // portfolio_content must be an array of objects with both asset_content (display text)
+  // and asset_ids (TikTok CTA asset IDs — 7660537842128473109 is the shared Learn More asset)
+  const CTA_DISPLAY = {
+    LEARN_MORE: 'Learn More', SHOP_NOW: 'Shop Now', SIGN_UP: 'Sign Up',
+    ORDER_NOW: 'Order Now', BOOK_NOW: 'Book Now', CONTACT_US: 'Contact Us',
+    GET_QUOTE: 'Get Quote', DOWNLOAD: 'Download', APPLY_NOW: 'Apply Now',
+    WATCH_NOW: 'Watch Now', VISIT_STORE: 'Visit Store',
+  };
+  const CTA_ASSET_ID = '7660537842128473109'; // shared CTA asset ID (from BC 7647108736141574160)
   const createRes = await ttPost('/creative/portfolio/create/', {
     portfolio_type: 'CALL_TO_ACTION',
     portfolio_name: `auto_${cta.toLowerCase()}_${Date.now()}`,
-    portfolio_content: {
-      call_to_action_items: [{ call_to_action: cta }],
-    },
+    portfolio_content: [{
+      asset_content: CTA_DISPLAY[cta] || cta,
+      asset_ids: [CTA_ASSET_ID],
+    }],
   }, adv_id);
   console.log(`CTA portfolio create (adv=${adv_id}, cta=${cta}):`, JSON.stringify(createRes));
   const portfolio_id = createRes.data?.portfolio_id;
@@ -1023,7 +1033,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     ...(resolvedIdentityType === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id || BC_ID } : {}),
   };
 
-  const cta = row.cta || 'SHOP_NOW';
+  const cta = row.cta || 'LEARN_MORE';
   const portfolio_id = await getOrCreateCtaPortfolio(cta, adv_id);
   console.log(`CTA: ${cta}, portfolio_id: ${portfolio_id}`);
 
