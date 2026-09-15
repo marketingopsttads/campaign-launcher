@@ -935,7 +935,12 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   for (const video_id of dedupedIds) {
     const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
     if (image_id) coverMap[video_id] = image_id;
+    else console.warn(`Skipping video ${video_id} — cover image unavailable after all retries`);
   }
+  const usableIds = dedupedIds.filter(id => coverMap[id]);
+  if (!usableIds.length) throw new Error('No videos had usable cover images — all were skipped');
+  const skipped = dedupedIds.length - usableIds.length;
+  if (skipped) console.warn(`${skipped} video(s) skipped due to missing covers`);
 
   const resolvedIdentityType = identity_type || 'BC_AUTH_TT';
   const creativeIdentity = {
@@ -944,9 +949,8 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     ...(resolvedIdentityType === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id || BC_ID } : {}),
   };
 
-  const creative_list = dedupedIds.map(video_id => {
+  const creative_list = usableIds.map(video_id => {
     const cover = coverMap[video_id];
-    if (!cover) throw new Error(`Could not fetch cover image for video ${video_id} — required for Smart Plus ads`);
     return {
       creative_info: {
         ad_format: 'SINGLE_VIDEO',
