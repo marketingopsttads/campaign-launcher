@@ -1129,8 +1129,7 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
       dimensions: JSON.stringify(['campaign_id']),
       metrics: JSON.stringify([
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
-        'conversions', 'cost_per_conversion', 'conversion_rate',
-        'video_views', 'video_play_actions', 'reach', 'frequency',
+        'video_play_actions', 'reach', 'frequency',
         'result', 'cost_per_result', 'result_rate',
       ]),
       start_date,
@@ -1188,8 +1187,7 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
       dimensions: JSON.stringify(['adgroup_id']),
       metrics: JSON.stringify([
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
-        'conversions', 'cost_per_conversion', 'conversion_rate',
-        'video_views', 'video_play_actions', 'reach', 'frequency',
+        'video_play_actions', 'reach', 'frequency',
         'result', 'cost_per_result', 'result_rate',
       ]),
       filtering: JSON.stringify([{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify([campaign_id]) }]),
@@ -1241,8 +1239,7 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
       dimensions: JSON.stringify(['ad_id']),
       metrics: JSON.stringify([
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
-        'conversions', 'cost_per_conversion', 'conversion_rate',
-        'video_views', 'video_play_actions', 'reach', 'frequency',
+        'video_play_actions', 'reach', 'frequency',
         'result', 'cost_per_result', 'result_rate',
       ]),
       filtering: JSON.stringify([{ field_name: 'adgroup_ids', filter_type: 'IN', filter_value: JSON.stringify([adgroup_id]) }]),

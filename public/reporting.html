@@ -432,8 +432,8 @@ function renderSummary(rows) {
     { label: 'CTR', value: fmtPct(avg('ctr')), cls: 'blue' },
     { label: 'CPM', value: fmtDollar(avg('cpm')), cls: '' },
     { label: 'CPC', value: fmtDollar(avg('cpc')), cls: '' },
-    { label: 'Conversions', value: fmtNum(sum('conversions')), cls: 'green' },
-    { label: 'CPA', value: fmtDollar(avg('cost_per_conversion')), cls: '' },
+    { label: 'Results', value: fmtNum(sum('result')), cls: 'green' },
+    { label: 'Cost/Result', value: fmtDollar(avg('cost_per_result')), cls: '' },
     { label: 'Reach', value: fmtNum(sum('reach')), cls: '' },
   ];
   grid.innerHTML = cards.map(c =>
@@ -452,13 +452,12 @@ const COLS_CAMPAIGNS = [
   { key: 'ctr', label: 'CTR', fmt: 'pct' },
   { key: 'cpm', label: 'CPM', fmt: 'dollar' },
   { key: 'cpc', label: 'CPC', fmt: 'dollar' },
-  { key: 'conversions', label: 'Conversions', fmt: 'num' },
-  { key: 'cost_per_conversion', label: 'CPA', fmt: 'dollar' },
   { key: 'result', label: 'Results', fmt: 'num' },
   { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
+  { key: 'result_rate', label: 'Result Rate', fmt: 'pct' },
   { key: 'reach', label: 'Reach', fmt: 'num' },
   { key: 'frequency', label: 'Frequency', fmt: 'num2' },
-  { key: 'video_views', label: 'Video Views', fmt: 'num' },
+  { key: 'video_play_actions', label: 'Video Plays', fmt: 'num' },
 ];
 
 const COLS_ADGROUPS = [
@@ -472,12 +471,12 @@ const COLS_ADGROUPS = [
   { key: 'ctr', label: 'CTR', fmt: 'pct' },
   { key: 'cpm', label: 'CPM', fmt: 'dollar' },
   { key: 'cpc', label: 'CPC', fmt: 'dollar' },
-  { key: 'conversions', label: 'Conversions', fmt: 'num' },
-  { key: 'cost_per_conversion', label: 'CPA', fmt: 'dollar' },
   { key: 'result', label: 'Results', fmt: 'num' },
   { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
+  { key: 'result_rate', label: 'Result Rate', fmt: 'pct' },
   { key: 'reach', label: 'Reach', fmt: 'num' },
-  { key: 'video_views', label: 'Video Views', fmt: 'num' },
+  { key: 'frequency', label: 'Frequency', fmt: 'num2' },
+  { key: 'video_play_actions', label: 'Video Plays', fmt: 'num' },
 ];
 
 const COLS_ADS = [
@@ -489,12 +488,11 @@ const COLS_ADS = [
   { key: 'ctr', label: 'CTR', fmt: 'pct' },
   { key: 'cpm', label: 'CPM', fmt: 'dollar' },
   { key: 'cpc', label: 'CPC', fmt: 'dollar' },
-  { key: 'conversions', label: 'Conversions', fmt: 'num' },
-  { key: 'cost_per_conversion', label: 'CPA', fmt: 'dollar' },
   { key: 'result', label: 'Results', fmt: 'num' },
   { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
+  { key: 'result_rate', label: 'Result Rate', fmt: 'pct' },
   { key: 'reach', label: 'Reach', fmt: 'num' },
-  { key: 'video_views', label: 'Video Views', fmt: 'num' },
+  { key: 'video_play_actions', label: 'Video Plays', fmt: 'num' },
 ];
 
 function getCols(level) {
