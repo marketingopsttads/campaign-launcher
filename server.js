@@ -1083,6 +1083,27 @@ app.get('/reporting', requireAuth, (req, res) => {
 
 // ── Reporting API ──────────────────────────────────────────────────────────
 
+// GET /api/reporting/debug — shows raw TikTok API responses for diagnosis
+app.get('/api/reporting/debug', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, start_date, end_date } = req.query;
+  const sd = start_date || new Date().toISOString().slice(0,10);
+  const ed = end_date || sd;
+  const [campList, reportData] = await Promise.allSettled([
+    ttGet('/campaign/get/', { fields: JSON.stringify(['campaign_id','campaign_name','status']), page_size: 10 }, adv_id),
+    ttGet('/report/integrated/get/', {
+      service_type: 'AUCTION', report_type: 'BASIC', data_level: 'AUCTION_CAMPAIGN',
+      dimensions: JSON.stringify(['campaign_id']),
+      metrics: JSON.stringify(['spend','impressions','clicks']),
+      start_date: sd, end_date: ed, page: 1, page_size: 10,
+    }, adv_id),
+  ]);
+  res.json({
+    adv_id,
+    campList: campList.status === 'fulfilled' ? campList.value : { error: campList.reason?.message },
+    reportData: reportData.status === 'fulfilled' ? reportData.value : { error: reportData.reason?.message },
+  });
+});
+
 // GET /api/reporting/campaigns
 // Query: adv_id, start_date, end_date
 // Returns ALL campaigns (active + inactive) left-joined with reporting metrics
@@ -1093,11 +1114,12 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
     // Fetch all campaigns regardless of status
     const campList = await ttGet('/campaign/get/', {
       fields: JSON.stringify(['campaign_id', 'campaign_name', 'status', 'budget', 'budget_mode',
-        'objective_type', 'campaign_type', 'campaign_automation_type', 'operation_status']),
+        'objective_type', 'campaign_type', 'campaign_automation_type']),
       page_size: 1000,
     }, adv_id);
+    console.log(`campaigns list code:${campList.code} count:${campList.data?.list?.length}`);
+    if (campList.code !== 0) console.warn('campaign/get error:', JSON.stringify(campList));
     const campaigns = campList.data?.list || [];
-    console.log(`campaigns list: ${campaigns.length} total`);
 
     // Fetch reporting metrics (only campaigns with activity will appear)
     const reportData = await ttGet('/report/integrated/get/', {
@@ -1131,7 +1153,9 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
       meta: c,
       ...(metricsMap[c.campaign_id] || {}),
     }));
-    res.json({ rows });
+    const apiError = campList.code !== 0 ? `campaign/get code ${campList.code}: ${campList.message}` :
+      (reportData.code !== 0 ? `report code ${reportData.code}: ${reportData.message}` : null);
+    res.json({ rows, apiError });
   } catch (e) {
     console.error('reporting/campaigns error:', e.message);
     res.status(500).json({ error: e.message });

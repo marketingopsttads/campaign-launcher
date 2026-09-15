@@ -389,6 +389,7 @@ async function fetchAndRender(level) {
     state.sortKey = '';
     renderSummary(state.rows);
     renderTable(level, state.rows);
+    if (data.apiError) toast(`TikTok API: ${data.apiError}`, 'error');
   } catch(e) {
     showError(e.message);
   }
