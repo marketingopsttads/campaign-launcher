@@ -1089,8 +1089,10 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, start_date, end_date } = req.query;
   if (!start_date || !end_date) return res.status(400).json({ error: 'start_date and end_date required' });
   try {
-    const data = await ttGet('/reports/integrated/get/', {
+    const data = await ttGet('/report/integrated/get/', {
+      service_type: 'AUCTION',
       report_type: 'BASIC',
+      data_level: 'AUCTION_CAMPAIGN',
       dimensions: JSON.stringify(['campaign_id']),
       metrics: JSON.stringify([
         'campaign_name', 'objective_type', 'campaign_budget', 'campaign_budget_mode',
@@ -1104,6 +1106,7 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
       page: 1,
       page_size: 1000,
     }, adv_id);
+    console.log('reporting/campaigns raw:', JSON.stringify(data).slice(0, 300));
     // Also fetch campaign list for bid strategy info
     const campList = await ttGet('/campaign/get/', {
       fields: JSON.stringify(['campaign_id', 'campaign_name', 'status', 'budget', 'budget_mode', 'objective_type', 'campaign_type', 'campaign_automation_type']),
@@ -1128,22 +1131,25 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, campaign_id, start_date, end_date } = req.query;
   if (!campaign_id || !start_date || !end_date) return res.status(400).json({ error: 'campaign_id, start_date, end_date required' });
   try {
-    const data = await ttGet('/reports/integrated/get/', {
+    const data = await ttGet('/report/integrated/get/', {
+      service_type: 'AUCTION',
       report_type: 'BASIC',
+      data_level: 'AUCTION_ADGROUP',
       dimensions: JSON.stringify(['adgroup_id']),
       metrics: JSON.stringify([
-        'adgroup_name', 'campaign_id', 'campaign_name', 'status',
+        'adgroup_name', 'campaign_id', 'campaign_name',
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
         'conversions', 'cost_per_conversion', 'conversion_rate',
         'video_views', 'video_play_actions', 'reach', 'frequency',
         'result', 'cost_per_result', 'result_rate',
       ]),
-      filtering: JSON.stringify([{ field_name: 'campaign_id', filter_type: 'IN', filter_value: JSON.stringify([campaign_id]) }]),
+      filtering: JSON.stringify([{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify([campaign_id]) }]),
       start_date,
       end_date,
       page: 1,
       page_size: 1000,
     }, adv_id);
+    console.log('reporting/adgroups raw:', JSON.stringify(data).slice(0, 300));
     // Fetch adgroup list for bid strategy info
     const agList = await ttGet('/adgroup/get/', {
       campaign_ids: JSON.stringify([campaign_id]),
@@ -1169,22 +1175,25 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, adgroup_id, start_date, end_date } = req.query;
   if (!adgroup_id || !start_date || !end_date) return res.status(400).json({ error: 'adgroup_id, start_date, end_date required' });
   try {
-    const data = await ttGet('/reports/integrated/get/', {
+    const data = await ttGet('/report/integrated/get/', {
+      service_type: 'AUCTION',
       report_type: 'BASIC',
+      data_level: 'AUCTION_AD',
       dimensions: JSON.stringify(['ad_id']),
       metrics: JSON.stringify([
-        'ad_name', 'adgroup_id', 'campaign_id', 'status',
+        'ad_name', 'adgroup_id', 'campaign_id',
         'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
         'conversions', 'cost_per_conversion', 'conversion_rate',
         'video_views', 'video_play_actions', 'reach', 'frequency',
         'result', 'cost_per_result', 'result_rate',
       ]),
-      filtering: JSON.stringify([{ field_name: 'adgroup_id', filter_type: 'IN', filter_value: JSON.stringify([adgroup_id]) }]),
+      filtering: JSON.stringify([{ field_name: 'adgroup_ids', filter_type: 'IN', filter_value: JSON.stringify([adgroup_id]) }]),
       start_date,
       end_date,
       page: 1,
       page_size: 1000,
     }, adv_id);
+    console.log('reporting/ads raw:', JSON.stringify(data).slice(0, 300));
     const rows = (data.data?.list || []).map(r => ({ ...r.dimensions, ...r.metrics }));
     res.json({ rows });
   } catch (e) {
