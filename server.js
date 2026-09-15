@@ -958,8 +958,10 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
   // 2. Create a new portfolio
   const createRes = await ttPost('/creative/portfolio/create/', {
     portfolio_type: 'CALL_TO_ACTION',
-    call_to_action: cta,
     portfolio_name: `auto_${cta.toLowerCase()}_${Date.now()}`,
+    portfolio_content: {
+      call_to_action_items: [{ call_to_action: cta }],
+    },
   }, adv_id);
   console.log(`CTA portfolio create (adv=${adv_id}, cta=${cta}):`, JSON.stringify(createRes));
   const portfolio_id = createRes.data?.portfolio_id;
