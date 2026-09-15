@@ -286,7 +286,7 @@ async function loadAccounts() {
     const data = await r.json();
     const sel = document.getElementById('accountSelect');
     sel.innerHTML = '';
-    const accounts = data.accounts || [];
+    const accounts = Array.isArray(data) ? data : (data.accounts || []);
     if (!accounts.length) {
       sel.innerHTML = '<option value="">No accounts</option>';
       return;
