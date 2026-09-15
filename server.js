@@ -384,6 +384,7 @@ app.get('/sample', requireAuth, async (req, res) => {
     ...Array.from({length:10},(_,i) => ({ key:`video_url_${i+1}`, label:`video_url_${i+1}`, width: 44 })),
     ...Array.from({length:5}, (_,i) => ({ key:`headline_${i+1}`,  label:`headline_${i+1}`,  width: 32 })),
     { key: 'url', label: 'url', width: 50 },
+    { key: 'cover_image', label: 'cover_image', width: 50 },
   ];
 
   ws.columns = HEADERS.map(h => ({ header: h.label, key: h.key, width: h.width }));
@@ -556,6 +557,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
         videos,
         headlines,
         url: r.url,
+        cover_image: r.cover_image?.trim() || null,
         language,
         validationErrors,
         status: 'pending',
@@ -932,11 +934,26 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises, adv_id) {
   const dedupedIds = [...new Set(video_ids)];
   const coverMap = {};
-  for (const video_id of dedupedIds) {
-    const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
-    if (image_id) coverMap[video_id] = image_id;
-    else console.warn(`Skipping video ${video_id} — cover image unavailable after all retries`);
+
+  if (row.cover_image) {
+    // User-supplied cover image URL — upload it once and use for all videos
+    console.log(`Using user-supplied cover image: ${row.cover_image}`);
+    const uploadRes = await ttPost('/file/image/ad/upload/', {
+      upload_type: 'UPLOAD_BY_URL',
+      image_url: row.cover_image,
+      image_name: `cover_custom_${Date.now()}`,
+    }, adv_id);
+    const image_id = uploadRes.data?.image_id;
+    if (!image_id) throw new Error(`Failed to upload custom cover image: ${JSON.stringify(uploadRes)}`);
+    dedupedIds.forEach(id => { coverMap[id] = image_id; });
+  } else {
+    for (const video_id of dedupedIds) {
+      const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
+      if (image_id) coverMap[video_id] = image_id;
+      else console.warn(`Skipping video ${video_id} — cover image unavailable after all retries`);
+    }
   }
+
   const usableIds = dedupedIds.filter(id => coverMap[id]);
   if (!usableIds.length) throw new Error('No videos had usable cover images — all were skipped');
   const skipped = dedupedIds.length - usableIds.length;
