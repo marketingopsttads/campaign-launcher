@@ -954,25 +954,13 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
-  // Fetch CTA portfolio ID for this advertiser account
-  let call_to_action_id;
-  const portRes = await ttGet('/creative/portfolio/list/', { portfolio_type: 'CALL_TO_ACTION' }, adv_id);
-  console.log(`[CTA portfolios for ${adv_id}]:`, JSON.stringify(portRes));
-  const portfolios = portRes.data?.list || [];
-  const learnMore = portfolios.find(p =>
-    p.call_to_action === 'LEARN_MORE' ||
-    p.portfolio_name?.toUpperCase().includes('LEARN')
-  );
-  call_to_action_id = (learnMore || portfolios[0])?.portfolio_id;
-  if (!call_to_action_id) throw new Error(`No LEARN_MORE CTA portfolio found for advertiser ${adv_id}. Available: ${JSON.stringify(portRes)}`);
-  console.log(`Using CTA portfolio ${call_to_action_id} for ${adv_id}`);
-
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
-      ad_configuration: { ...creativeIdentity, call_to_action_id },
+      ad_configuration: { ...creativeIdentity },
+      call_to_action_list: [{ call_to_action: 'LEARN_MORE' }],
       ad_text_list,
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
