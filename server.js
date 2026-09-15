@@ -946,6 +946,7 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
     page: 1,
     page_size: 100,
   }, adv_id);
+  console.log(`CTA portfolio list (adv=${adv_id}):`, JSON.stringify(listRes));
   const list = listRes.data?.list || [];
   const match = list.find(p => p.call_to_action === cta || p.portfolio_name?.includes(cta));
   if (match?.portfolio_id) {
@@ -960,6 +961,7 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
     call_to_action: cta,
     portfolio_name: `auto_${cta.toLowerCase()}_${Date.now()}`,
   }, adv_id);
+  console.log(`CTA portfolio create (adv=${adv_id}, cta=${cta}):`, JSON.stringify(createRes));
   const portfolio_id = createRes.data?.portfolio_id;
   if (!portfolio_id) {
     console.warn(`CTA portfolio create failed for ${cta}: ${JSON.stringify(createRes)}`);
@@ -1021,9 +1023,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const cta = row.cta || 'SHOP_NOW';
   const portfolio_id = await getOrCreateCtaPortfolio(cta, adv_id);
-  const ctaFields = portfolio_id
-    ? { call_to_action_id: portfolio_id }
-    : { call_to_action_list: [{ call_to_action: cta }] };
+  console.log(`CTA: ${cta}, portfolio_id: ${portfolio_id}`);
 
   const creative_list = usableIds.map(video_id => {
     const cover = coverMap[video_id];
@@ -1042,14 +1042,20 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   for (let i = 0; i < creative_list.length; i += 50) {
     const batch = creative_list.slice(i, i + 50);
-    const res = await ttPost('/smart_plus/ad/create/', {
+    const postBody = {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
-      ad_configuration: { ...creativeIdentity, ...ctaFields },
+      ad_configuration: {
+        ...creativeIdentity,
+        ...(portfolio_id ? { call_to_action_id: portfolio_id } : {}),
+      },
       ad_text_list,
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
-    }, adv_id);
+      ...(!portfolio_id ? { call_to_action_list: [{ call_to_action: cta }] } : {}),
+    };
+    console.log('smart_plus/ad/create body (excl creatives):', JSON.stringify({ ...postBody, creative_list: `[${batch.length} items]` }));
+    const res = await ttPost('/smart_plus/ad/create/', postBody, adv_id);
     if (res.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(res)}`);
   }
 }
