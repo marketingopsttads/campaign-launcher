@@ -238,6 +238,46 @@
   </div>
 </div>
 
+<!-- Budget Modal -->
+<div class="modal-overlay" id="budgetModal">
+  <div class="modal">
+    <div class="modal-title">Edit Budget</div>
+    <div class="modal-sub" id="budgetModalSub"></div>
+    <div id="budgetModalStep1">
+      <div class="modal-body">
+        <div>
+          <div class="field-label">New Daily Budget ($)</div>
+          <input type="number" id="budgetInput" placeholder="e.g. 50.00" min="1" step="0.01" style="width:100%">
+        </div>
+        <div class="warning-box">⚠️ This sets the daily budget for all selected items immediately via the TikTok API.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeBudgetModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="showBudgetConfirm()">Review →</button>
+      </div>
+    </div>
+    <div id="budgetModalStep2" style="display:none">
+      <div class="modal-body">
+        <div>
+          <div class="field-label">Applying to</div>
+          <div class="confirm-list" id="budgetConfirmList"></div>
+        </div>
+        <div>
+          <div class="field-label">New budget</div>
+          <div style="font-size:13px" id="budgetConfirmChange"></div>
+        </div>
+        <div class="warning-box" style="color:#ef4444; border-color:rgba(239,68,68,.3); background:rgba(239,68,68,.08)">
+          ⛔ This action cannot be undone automatically. Confirm before proceeding.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="showBudgetStep1()">← Back</button>
+        <button class="btn btn-danger" onclick="applyBudget()">Confirm &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast area -->
 <div class="toast-area" id="toastArea"></div>
 
@@ -539,13 +579,16 @@ function sortRows(rows, key, dir) {
   });
 }
 
+// Store current row ids so toggleAll doesn't need JSON in HTML attributes
+let _currentAllIds = [];
+
 function renderTable(level, rows) {
   const title = level === 'campaigns' ? 'Campaigns' : level === 'adgroups' ? 'Ad Sets' : 'Ads';
   document.getElementById('tableTitle').textContent = title;
   const cols = getCols(level);
   const idKey = level === 'campaigns' ? 'campaign_id' : level === 'adgroups' ? 'adgroup_id' : 'ad_id';
   const nameKey = level === 'campaigns' ? 'campaign_name' : level === 'adgroups' ? 'adgroup_name' : 'ad_name';
-  const showCheckbox = level === 'adgroups';
+  const showCheckbox = level === 'campaigns' || level === 'adgroups';
 
   if (!rows.length) {
     document.getElementById('tableBody').innerHTML = '<div class="state-box"><div>No data for this period</div></div>';
@@ -553,18 +596,17 @@ function renderTable(level, rows) {
     return;
   }
 
-  const allIds = rows.map(r => r[idKey]);
+  _currentAllIds = rows.map(r => r[idKey]);
 
   const head = `<thead><tr>
-    ${showCheckbox ? `<th class="checkbox-cell"><input type="checkbox" id="checkAll" onchange="toggleAll(this, ${JSON.stringify(allIds)})"></th>` : ''}
+    ${showCheckbox ? `<th class="checkbox-cell"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>` : ''}
     ${cols.map(c => `<th onclick="doSort('${c.key}')" data-key="${c.key}"><span>${c.label}</span><span class="sort-icon"></span></th>`).join('')}
   </tr></thead>`;
 
   const body = rows.map((row, rowIdx) => {
     const id = row[idKey];
-    const name = row[nameKey] || row[`meta.${nameKey}`] || id;
     return `<tr class="${state.selectedIds.has(id) ? 'selected' : ''}" data-id="${id}">
-      ${showCheckbox ? `<td class="checkbox-cell"><input type="checkbox" ${state.selectedIds.has(id) ? 'checked' : ''} onchange="toggleRow('${id}', this)"></td>` : ''}
+      ${showCheckbox ? `<td class="checkbox-cell"><input type="checkbox" ${state.selectedIds.has(id) ? 'checked' : ''} onchange="toggleRow('${esc(id)}', this)"></td>` : ''}
       ${cols.map(c => {
         if (c.drill) {
           const drillFn = level === 'campaigns' ? `drillAdgroupsByIdx(${rowIdx})` : `drillAdsByIdx(${rowIdx})`;
@@ -596,8 +638,8 @@ function updateSortUI() {
   });
 }
 
-function toggleAll(cb, ids) {
-  if (cb.checked) ids.forEach(id => state.selectedIds.add(id));
+function toggleAll(cb) {
+  if (cb.checked) _currentAllIds.forEach(id => state.selectedIds.add(id));
   else state.selectedIds.clear();
   document.querySelectorAll('tbody input[type=checkbox]').forEach(c => { c.checked = cb.checked; });
   document.querySelectorAll('tbody tr[data-id]').forEach(tr => { tr.classList.toggle('selected', cb.checked); });
@@ -621,12 +663,24 @@ function updateSelCount() {
 function updateToolbar(level, count) {
   const actions = document.getElementById('tableActions');
   actions.innerHTML = '';
+  if (level === 'campaigns') {
+    const b1 = document.createElement('button');
+    b1.className = 'btn btn-secondary btn-sm';
+    b1.textContent = '💰 Edit Budget';
+    b1.onclick = openBudgetModal;
+    actions.appendChild(b1);
+  }
   if (level === 'adgroups') {
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-secondary btn-sm';
-    btn.textContent = '⚙ Change Bid Strategy';
-    btn.onclick = openBidModal;
-    actions.appendChild(btn);
+    const b1 = document.createElement('button');
+    b1.className = 'btn btn-secondary btn-sm';
+    b1.textContent = '💰 Edit Budget';
+    b1.onclick = openBudgetModal;
+    actions.appendChild(b1);
+    const b2 = document.createElement('button');
+    b2.className = 'btn btn-secondary btn-sm';
+    b2.textContent = '⚙ Change Bid Strategy';
+    b2.onclick = openBidModal;
+    actions.appendChild(b2);
   }
 }
 
@@ -687,6 +741,61 @@ async function applyBidStrategy() {
     else toast(`${ok} updated, ${fail} failed`, 'error');
     // Refresh
     await fetchAndRender('adgroups');
+  } catch(e) {
+    toast('Request failed: ' + e.message, 'error');
+  }
+}
+
+// ── Budget Modal ─────────────────────────────────────────────────────────────
+function openBudgetModal() {
+  if (!state.selectedIds.size) return toast('Select at least one item', 'error');
+  const n = state.selectedIds.size;
+  const type = state.level === 'campaigns' ? 'campaign' : 'ad set';
+  document.getElementById('budgetModalSub').textContent = `${n} ${type}${n>1?'s':''} selected`;
+  document.getElementById('budgetInput').value = '';
+  showBudgetStep1();
+  document.getElementById('budgetModal').classList.add('open');
+}
+
+function closeBudgetModal() { document.getElementById('budgetModal').classList.remove('open'); }
+
+function showBudgetStep1() {
+  document.getElementById('budgetModalStep1').style.display = 'block';
+  document.getElementById('budgetModalStep2').style.display = 'none';
+}
+
+function showBudgetConfirm() {
+  const bv = document.getElementById('budgetInput').value;
+  if (!bv || parseFloat(bv) <= 0) return toast('Enter a valid budget amount', 'error');
+  const idKey = state.level === 'campaigns' ? 'campaign_id' : 'adgroup_id';
+  const nameKey = state.level === 'campaigns' ? 'campaign_name' : 'adgroup_name';
+  const selectedRows = state.rows.filter(r => state.selectedIds.has(r[idKey]));
+  document.getElementById('budgetConfirmList').innerHTML = selectedRows.map(r =>
+    `<div class="confirm-list-item">${esc(r[nameKey] || r[idKey])}</div>`
+  ).join('');
+  document.getElementById('budgetConfirmChange').innerHTML = `Daily budget → <strong>$${parseFloat(bv).toFixed(2)}</strong>`;
+  document.getElementById('budgetModalStep1').style.display = 'none';
+  document.getElementById('budgetModalStep2').style.display = 'block';
+}
+
+async function applyBudget() {
+  const budget = parseFloat(document.getElementById('budgetInput').value);
+  const type = state.level === 'campaigns' ? 'campaign' : 'adgroup';
+  const idKey = state.level === 'campaigns' ? 'campaign_id' : 'adgroup_id';
+  const items = [...state.selectedIds].map(id => ({ type, id, budget }));
+  closeBudgetModal();
+  try {
+    const r = await fetch('/api/reporting/budget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adv_id: state.adv_id, items }),
+    });
+    const data = await r.json();
+    const ok = data.results?.filter(x => x.ok).length || 0;
+    const fail = data.results?.filter(x => !x.ok).length || 0;
+    if (fail === 0) toast(`✓ Budget updated for ${ok} item${ok>1?'s':''}`, 'success');
+    else toast(`${ok} updated, ${fail} failed`, 'error');
+    await fetchAndRender(state.level);
   } catch(e) {
     toast('Request failed: ' + e.message, 'error');
   }

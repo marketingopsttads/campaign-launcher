@@ -1293,6 +1293,31 @@ app.post('/api/reporting/bid-strategy', requireAuth, async (req, res) => {
   res.json({ results });
 });
 
+// POST /api/reporting/budget
+// Body: { adv_id, items: [{ type:'campaign'|'adgroup', id, budget }] }
+app.post('/api/reporting/budget', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, items } = req.body;
+  if (!items?.length) return res.status(400).json({ error: 'items required' });
+  const results = [];
+  for (const item of items) {
+    const { type, id, budget } = item;
+    const amt = parseFloat(budget);
+    if (!id || isNaN(amt) || amt <= 0) { results.push({ id, ok: false, message: 'invalid budget' }); continue; }
+    try {
+      let r;
+      if (type === 'campaign') {
+        r = await ttPost('/campaign/update/', { campaign_id: id, budget: amt }, adv_id);
+      } else {
+        r = await ttPost('/adgroup/update/', { adgroup_id: id, budget: amt }, adv_id);
+      }
+      results.push({ id, ok: r.code === 0, code: r.code, message: r.message });
+    } catch (e) {
+      results.push({ id, ok: false, message: e.message });
+    }
+  }
+  res.json({ results });
+});
+
 // ── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Campaign launcher running at http://localhost:${PORT}`));
