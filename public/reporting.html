@@ -297,7 +297,7 @@ function applyStatusFilter(rows) {
   if (state.statusFilter === 'ALL') return rows;
   const ACTIVE_STATUSES = new Set(['STATUS_DELIVERY_OK', 'ENABLE', 'ACTIVE', 'STATUS_ACTIVE', 'CAMPAIGN_STATUS_DELIVERY_OK']);
   return rows.filter(r => {
-    const s = String(r.meta?.status || r.meta?.operation_status || '').toUpperCase();
+    const s = String(r.meta?.secondary_status || r.meta?.operation_status || '').toUpperCase();
     if (state.statusFilter === 'ACTIVE') return ACTIVE_STATUSES.has(s) || s.includes('OK') || s.includes('ENABLE') || s.includes('ACTIVE');
     if (state.statusFilter === 'INACTIVE') return !ACTIVE_STATUSES.has(s) && !s.includes('OK') && !s.includes('ENABLE') && !s.includes('ACTIVE');
     return true;
@@ -503,7 +503,7 @@ function getCols(level) {
 function fmtCell(row, col) {
   const v = row[col.key] ?? row.meta?.[col.key] ?? '';
   if (col.render === 'status') {
-    const s = String(v || row.meta?.status || '').toUpperCase();
+    const s = String(v || row.meta?.secondary_status || row.meta?.operation_status || '').toUpperCase();
     const cls = s === 'ENABLE' || s === 'ACTIVE' ? 'badge-active' : s === 'DISABLE' || s === 'PAUSED' ? 'badge-paused' : 'badge-deleted';
     return `<span class="badge ${cls}">${s || '—'}</span>`;
   }

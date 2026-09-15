@@ -1089,7 +1089,7 @@ app.get('/api/reporting/debug', requireAuth, async (req, res) => {
   const sd = start_date || new Date().toISOString().slice(0,10);
   const ed = end_date || sd;
   const [campList, reportData] = await Promise.allSettled([
-    ttGet('/campaign/get/', { fields: JSON.stringify(['campaign_id','campaign_name','status']), page_size: 10 }, adv_id),
+    ttGet('/campaign/get/', { fields: JSON.stringify(['campaign_id','campaign_name','secondary_status','operation_status']), page_size: 10 }, adv_id),
     ttGet('/report/integrated/get/', {
       service_type: 'AUCTION', report_type: 'BASIC', data_level: 'AUCTION_CAMPAIGN',
       dimensions: JSON.stringify(['campaign_id']),
@@ -1113,8 +1113,8 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
   try {
     // Fetch all campaigns regardless of status
     const campList = await ttGet('/campaign/get/', {
-      fields: JSON.stringify(['campaign_id', 'campaign_name', 'status', 'budget', 'budget_mode',
-        'objective_type', 'campaign_type', 'campaign_automation_type']),
+      fields: JSON.stringify(['campaign_id', 'campaign_name', 'secondary_status', 'operation_status',
+        'budget', 'budget_mode', 'objective_type', 'campaign_type', 'campaign_automation_type']),
       page_size: 1000,
     }, adv_id);
     console.log(`campaigns list code:${campList.code} count:${campList.data?.list?.length}`);
@@ -1171,7 +1171,7 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
     // Fetch all adgroups for this campaign (all statuses)
     const agList = await ttGet('/adgroup/get/', {
       campaign_ids: JSON.stringify([campaign_id]),
-      fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'status', 'operation_status',
+      fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'secondary_status', 'operation_status',
         'budget', 'budget_mode', 'bid_type', 'bid_price', 'optimization_goal']),
       page_size: 1000,
     }, adv_id);
@@ -1225,7 +1225,7 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
     // Fetch all ads for this adgroup (all statuses)
     const adList = await ttGet('/ad/get/', {
       adgroup_ids: JSON.stringify([adgroup_id]),
-      fields: JSON.stringify(['ad_id', 'ad_name', 'status', 'operation_status']),
+      fields: JSON.stringify(['ad_id', 'ad_name', 'secondary_status', 'operation_status']),
       page_size: 1000,
     }, adv_id);
     const ads = adList.data?.list || [];
