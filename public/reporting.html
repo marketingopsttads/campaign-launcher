@@ -348,6 +348,9 @@ async function loadReport() {
   await fetchAndRender('campaigns');
 }
 
+function drillAdgroupsByIdx(idx) { drillAdgroups(state.rows[idx]); }
+function drillAdsByIdx(idx) { drillAds(state.rows[idx]); }
+
 async function drillAdgroups(campaign) {
   state.level = 'adgroups';
   state.campaign = campaign;
@@ -623,14 +626,14 @@ function renderTable(level, rows) {
     ${cols.map(c => `<th onclick="doSort('${c.key}')" data-key="${c.key}"><span>${c.label}</span><span class="sort-icon"></span></th>`).join('')}
   </tr></thead>`;
 
-  const body = rows.map(row => {
+  const body = rows.map((row, rowIdx) => {
     const id = row[idKey];
     const name = row[nameKey] || row[`meta.${nameKey}`] || id;
     return `<tr class="${state.selectedIds.has(id) ? 'selected' : ''}" data-id="${id}">
       ${showCheckbox ? `<td class="checkbox-cell"><input type="checkbox" ${state.selectedIds.has(id) ? 'checked' : ''} onchange="toggleRow('${id}', this)"></td>` : ''}
       ${cols.map(c => {
         if (c.drill) {
-          const drillFn = level === 'campaigns' ? `drillAdgroups(${JSON.stringify(row)})` : `drillAds(${JSON.stringify(row)})`;
+          const drillFn = level === 'campaigns' ? `drillAdgroupsByIdx(${rowIdx})` : `drillAdsByIdx(${rowIdx})`;
           return `<td class="name-cell"><span class="drill-link" onclick="${drillFn}" title="${esc(String(row[c.key] || id))}">${esc(String(row[c.key] || id))}</span></td>`;
         }
         return `<td>${fmtCell(row, c)}</td>`;
