@@ -983,7 +983,6 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   const creative_list = usableIds.map(video_id => {
     const cover = coverMap[video_id];
     return {
-      call_to_action_list: [{ call_to_action: 'LEARN_MORE' }],
       creative_info: {
         ad_format: 'SINGLE_VIDEO',
         video_info: { video_id },
@@ -1003,6 +1002,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
       ad_configuration: { ...creativeIdentity },
       ad_text_list,
+      call_to_action_list: [{ call_to_action: 'LEARN_MORE' }],
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
     }, adv_id);
