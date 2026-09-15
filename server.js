@@ -1074,7 +1074,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 }
 
 // ── Deploy version ping ────────────────────────────────────────────────────
-app.get('/api/version', (req, res) => res.json({ version: 'a528732', reporting: true }));
+app.get('/api/version', (req, res) => res.json({ version: 'b3f9a12', reporting: true, fullMetrics: true }));
 
 // ── Reporting page ─────────────────────────────────────────────────────────
 app.get('/reporting', requireAuth, (req, res) => {
@@ -1104,6 +1104,41 @@ app.get('/api/reporting/debug', requireAuth, async (req, res) => {
   });
 });
 
+// ── Reporting helpers ──────────────────────────────────────────────────────
+// Full validated metric names from TikTok Basic Report API docs v1.3
+// Grouped so we can drop categories if the account doesn't support them
+const METRICS_CORE = ['spend', 'billed_cost', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc', 'reach', 'frequency', 'cost_per_1000_reached'];
+const METRICS_RESULT = ['result', 'cost_per_result', 'result_rate', 'real_time_result', 'real_time_cost_per_result', 'real_time_result_rate', 'secondary_goal_result', 'cost_per_secondary_goal_result', 'secondary_goal_result_rate'];
+const METRICS_VIDEO = ['video_play_actions', 'video_watched_2s', 'video_watched_6s', 'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100', 'average_video_play', 'average_video_play_per_user', 'engaged_view'];
+const METRICS_ENGAGEMENT = ['engagements', 'engagement_rate', 'follows', 'likes', 'comments', 'shares', 'profile_visits', 'profile_visits_rate'];
+
+const METRICS_ALL = [...METRICS_CORE, ...METRICS_RESULT, ...METRICS_VIDEO, ...METRICS_ENGAGEMENT];
+
+// Cache of valid metrics per advertiser (avoids repeated rejection cycles)
+const validMetricsCache = {};
+
+// Fetch report metrics with auto-strip-and-retry on invalid metric errors (code 40002)
+async function fetchReportMetrics(params, adv_id) {
+  const cacheKey = `${adv_id}:${params.data_level}`;
+  let metrics = validMetricsCache[cacheKey] || METRICS_ALL;
+
+  let data = await ttGet('/report/integrated/get/', { ...params, metrics: JSON.stringify(metrics) }, adv_id);
+
+  // If TikTok rejects specific metrics, strip them and retry once
+  if (data.code === 40002 && data.message?.includes('Invalid metric')) {
+    const match = data.message.match(/Invalid metric fields:\s*\[([^\]]+)\]/);
+    if (match) {
+      const bad = match[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
+      console.warn(`Stripping invalid metrics for ${cacheKey}:`, bad);
+      metrics = metrics.filter(m => !bad.includes(m));
+      validMetricsCache[cacheKey] = metrics;
+      data = await ttGet('/report/integrated/get/', { ...params, metrics: JSON.stringify(metrics) }, adv_id);
+    }
+  }
+
+  return { data, usedMetrics: metrics };
+}
+
 // GET /api/reporting/campaigns
 // Query: adv_id, start_date, end_date
 // Returns ALL campaigns (active + inactive) left-joined with reporting metrics
@@ -1111,42 +1146,29 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, start_date, end_date } = req.query;
   if (!start_date || !end_date) return res.status(400).json({ error: 'start_date and end_date required' });
   try {
-    // Fetch all campaigns regardless of status
     const campList = await ttGet('/campaign/get/', {
       fields: JSON.stringify(['campaign_id', 'campaign_name', 'secondary_status', 'operation_status',
         'budget', 'budget_mode', 'objective_type', 'campaign_type', 'campaign_automation_type']),
       page_size: 1000,
     }, adv_id);
     console.log(`campaigns list code:${campList.code} count:${campList.data?.list?.length}`);
-    if (campList.code !== 0) console.warn('campaign/get error:', JSON.stringify(campList));
     const campaigns = campList.data?.list || [];
 
-    // Fetch reporting metrics (only campaigns with activity will appear)
-    const reportData = await ttGet('/report/integrated/get/', {
+    const { data: reportData, usedMetrics } = await fetchReportMetrics({
       service_type: 'AUCTION',
       report_type: 'BASIC',
       data_level: 'AUCTION_CAMPAIGN',
       dimensions: JSON.stringify(['campaign_id']),
-      metrics: JSON.stringify([
-        'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
-        'video_play_actions', 'reach', 'frequency',
-        'result', 'cost_per_result', 'result_rate',
-      ]),
-      start_date,
-      end_date,
-      page: 1,
-      page_size: 1000,
+      start_date, end_date,
+      page: 1, page_size: 1000,
     }, adv_id);
-    console.log('reporting/campaigns report code:', reportData.code, 'rows:', reportData.data?.list?.length);
+    console.log('reporting/campaigns report code:', reportData.code, 'rows:', reportData.data?.list?.length, 'metrics:', usedMetrics.length);
 
-    // Build metrics lookup keyed by campaign_id — stringify both sides to avoid type mismatch
     const metricsMap = {};
     (reportData.data?.list || []).forEach(r => {
       metricsMap[String(r.dimensions?.campaign_id)] = r.metrics || {};
     });
-    console.log(`metricsMap keys: ${Object.keys(metricsMap).length}, sample campaign_id types: campaign=${typeof campaigns[0]?.campaign_id}`);
 
-    // Left-join: every campaign, metrics filled in where available
     const rows = campaigns.map(c => ({
       campaign_id: String(c.campaign_id),
       campaign_name: c.campaign_name,
@@ -1156,7 +1178,7 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
     }));
     const apiError = campList.code !== 0 ? `campaign/get code ${campList.code}: ${campList.message}` :
       (reportData.code !== 0 ? `report code ${reportData.code}: ${reportData.message}` : null);
-    res.json({ rows, apiError, reportCode: reportData.code, reportMessage: reportData.message, reportRowCount: reportData.data?.list?.length ?? 0 });
+    res.json({ rows, apiError, reportCode: reportData.code, reportMessage: reportData.message, reportRowCount: reportData.data?.list?.length ?? 0, usedMetrics });
   } catch (e) {
     console.error('reporting/campaigns error:', e.message);
     res.status(500).json({ error: e.message });
@@ -1169,7 +1191,6 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, campaign_id, start_date, end_date } = req.query;
   if (!campaign_id || !start_date || !end_date) return res.status(400).json({ error: 'campaign_id, start_date, end_date required' });
   try {
-    // Fetch all adgroups for this campaign (all statuses)
     const agList = await ttGet('/adgroup/get/', {
       campaign_ids: JSON.stringify([campaign_id]),
       fields: JSON.stringify(['adgroup_id', 'adgroup_name', 'secondary_status', 'operation_status',
@@ -1179,22 +1200,14 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
     const adgroups = agList.data?.list || [];
     console.log(`adgroups list for campaign ${campaign_id}: ${adgroups.length}`);
 
-    // Fetch reporting metrics
-    const reportData = await ttGet('/report/integrated/get/', {
+    const { data: reportData, usedMetrics } = await fetchReportMetrics({
       service_type: 'AUCTION',
       report_type: 'BASIC',
       data_level: 'AUCTION_ADGROUP',
       dimensions: JSON.stringify(['adgroup_id']),
-      metrics: JSON.stringify([
-        'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
-        'video_play_actions', 'reach', 'frequency',
-        'result', 'cost_per_result', 'result_rate',
-      ]),
       filtering: JSON.stringify([{ field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify([campaign_id]) }]),
-      start_date,
-      end_date,
-      page: 1,
-      page_size: 1000,
+      start_date, end_date,
+      page: 1, page_size: 1000,
     }, adv_id);
     console.log('reporting/adgroups report code:', reportData.code, 'rows:', reportData.data?.list?.length);
 
@@ -1207,9 +1220,10 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
       adgroup_id: String(a.adgroup_id),
       adgroup_name: a.adgroup_name,
       meta: a,
+      hasMetrics: !!metricsMap[String(a.adgroup_id)],
       ...(metricsMap[String(a.adgroup_id)] || {}),
     }));
-    res.json({ rows });
+    res.json({ rows, reportCode: reportData.code, reportMessage: reportData.message, usedMetrics });
   } catch (e) {
     console.error('reporting/adgroups error:', e.message);
     res.status(500).json({ error: e.message });
@@ -1222,7 +1236,6 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
   const { adv_id = ADV_ID, adgroup_id, start_date, end_date } = req.query;
   if (!adgroup_id || !start_date || !end_date) return res.status(400).json({ error: 'adgroup_id, start_date, end_date required' });
   try {
-    // Fetch all ads for this adgroup (all statuses)
     const adList = await ttGet('/ad/get/', {
       adgroup_ids: JSON.stringify([adgroup_id]),
       fields: JSON.stringify(['ad_id', 'ad_name', 'secondary_status', 'operation_status']),
@@ -1231,22 +1244,14 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
     const ads = adList.data?.list || [];
     console.log(`ads list for adgroup ${adgroup_id}: ${ads.length}`);
 
-    // Fetch reporting metrics
-    const reportData = await ttGet('/report/integrated/get/', {
+    const { data: reportData, usedMetrics } = await fetchReportMetrics({
       service_type: 'AUCTION',
       report_type: 'BASIC',
       data_level: 'AUCTION_AD',
       dimensions: JSON.stringify(['ad_id']),
-      metrics: JSON.stringify([
-        'spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc',
-        'video_play_actions', 'reach', 'frequency',
-        'result', 'cost_per_result', 'result_rate',
-      ]),
       filtering: JSON.stringify([{ field_name: 'adgroup_ids', filter_type: 'IN', filter_value: JSON.stringify([adgroup_id]) }]),
-      start_date,
-      end_date,
-      page: 1,
-      page_size: 1000,
+      start_date, end_date,
+      page: 1, page_size: 1000,
     }, adv_id);
     console.log('reporting/ads report code:', reportData.code, 'rows:', reportData.data?.list?.length);
 
@@ -1259,9 +1264,10 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
       ad_id: String(a.ad_id),
       ad_name: a.ad_name,
       meta: a,
+      hasMetrics: !!metricsMap[String(a.ad_id)],
       ...(metricsMap[String(a.ad_id)] || {}),
     }));
-    res.json({ rows });
+    res.json({ rows, reportCode: reportData.code, reportMessage: reportData.message, usedMetrics });
   } catch (e) {
     console.error('reporting/ads error:', e.message);
     res.status(500).json({ error: e.message });
