@@ -390,6 +390,7 @@ async function fetchAndRender(level) {
     renderSummary(state.rows);
     renderTable(level, state.rows);
     if (data.apiError) toast(`TikTok API: ${data.apiError}`, 'error');
+    if (!data.apiError && data.reportRowCount === 0 && level === 'campaigns') toast('Report returned 0 metric rows for this date range — campaigns may have had no spend/activity', 'error');
   } catch(e) {
     showError(e.message);
   }

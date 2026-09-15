@@ -1140,22 +1140,24 @@ app.get('/api/reporting/campaigns', requireAuth, async (req, res) => {
     }, adv_id);
     console.log('reporting/campaigns report code:', reportData.code, 'rows:', reportData.data?.list?.length);
 
-    // Build metrics lookup keyed by campaign_id
+    // Build metrics lookup keyed by campaign_id — stringify both sides to avoid type mismatch
     const metricsMap = {};
     (reportData.data?.list || []).forEach(r => {
-      metricsMap[r.dimensions?.campaign_id] = r.metrics || {};
+      metricsMap[String(r.dimensions?.campaign_id)] = r.metrics || {};
     });
+    console.log(`metricsMap keys: ${Object.keys(metricsMap).length}, sample campaign_id types: campaign=${typeof campaigns[0]?.campaign_id}`);
 
     // Left-join: every campaign, metrics filled in where available
     const rows = campaigns.map(c => ({
-      campaign_id: c.campaign_id,
+      campaign_id: String(c.campaign_id),
       campaign_name: c.campaign_name,
       meta: c,
-      ...(metricsMap[c.campaign_id] || {}),
+      hasMetrics: !!metricsMap[String(c.campaign_id)],
+      ...(metricsMap[String(c.campaign_id)] || {}),
     }));
     const apiError = campList.code !== 0 ? `campaign/get code ${campList.code}: ${campList.message}` :
       (reportData.code !== 0 ? `report code ${reportData.code}: ${reportData.message}` : null);
-    res.json({ rows, apiError });
+    res.json({ rows, apiError, reportCode: reportData.code, reportMessage: reportData.message, reportRowCount: reportData.data?.list?.length ?? 0 });
   } catch (e) {
     console.error('reporting/campaigns error:', e.message);
     res.status(500).json({ error: e.message });
@@ -1200,14 +1202,14 @@ app.get('/api/reporting/adgroups', requireAuth, async (req, res) => {
 
     const metricsMap = {};
     (reportData.data?.list || []).forEach(r => {
-      metricsMap[r.dimensions?.adgroup_id] = r.metrics || {};
+      metricsMap[String(r.dimensions?.adgroup_id)] = r.metrics || {};
     });
 
     const rows = adgroups.map(a => ({
-      adgroup_id: a.adgroup_id,
+      adgroup_id: String(a.adgroup_id),
       adgroup_name: a.adgroup_name,
       meta: a,
-      ...(metricsMap[a.adgroup_id] || {}),
+      ...(metricsMap[String(a.adgroup_id)] || {}),
     }));
     res.json({ rows });
   } catch (e) {
@@ -1253,14 +1255,14 @@ app.get('/api/reporting/ads', requireAuth, async (req, res) => {
 
     const metricsMap = {};
     (reportData.data?.list || []).forEach(r => {
-      metricsMap[r.dimensions?.ad_id] = r.metrics || {};
+      metricsMap[String(r.dimensions?.ad_id)] = r.metrics || {};
     });
 
     const rows = ads.map(a => ({
-      ad_id: a.ad_id,
+      ad_id: String(a.ad_id),
       ad_name: a.ad_name,
       meta: a,
-      ...(metricsMap[a.ad_id] || {}),
+      ...(metricsMap[String(a.ad_id)] || {}),
     }));
     res.json({ rows });
   } catch (e) {
