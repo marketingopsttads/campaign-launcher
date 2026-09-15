@@ -933,6 +933,43 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
   return null;
 }
 
+// Cache: adv_id → { cta_string → portfolio_id }
+const ctaPortfolioCache = {};
+
+async function getOrCreateCtaPortfolio(cta, adv_id) {
+  if (!ctaPortfolioCache[adv_id]) ctaPortfolioCache[adv_id] = {};
+  if (ctaPortfolioCache[adv_id][cta]) return ctaPortfolioCache[adv_id][cta];
+
+  // 1. Fetch existing portfolios
+  const listRes = await ttGet('/creative/portfolio/list/', {
+    portfolio_type: 'CALL_TO_ACTION',
+    page: 1,
+    page_size: 100,
+  }, adv_id);
+  const list = listRes.data?.list || [];
+  const match = list.find(p => p.call_to_action === cta || p.portfolio_name?.includes(cta));
+  if (match?.portfolio_id) {
+    console.log(`Reusing CTA portfolio ${match.portfolio_id} for ${cta}`);
+    ctaPortfolioCache[adv_id][cta] = match.portfolio_id;
+    return match.portfolio_id;
+  }
+
+  // 2. Create a new portfolio
+  const createRes = await ttPost('/creative/portfolio/create/', {
+    portfolio_type: 'CALL_TO_ACTION',
+    call_to_action: cta,
+    portfolio_name: `auto_${cta.toLowerCase()}_${Date.now()}`,
+  }, adv_id);
+  const portfolio_id = createRes.data?.portfolio_id;
+  if (!portfolio_id) {
+    console.warn(`CTA portfolio create failed for ${cta}: ${JSON.stringify(createRes)}`);
+    return null;
+  }
+  console.log(`Created CTA portfolio ${portfolio_id} for ${cta}`);
+  ctaPortfolioCache[adv_id][cta] = portfolio_id;
+  return portfolio_id;
+}
+
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises, adv_id) {
   const dedupedIds = [...new Set(video_ids)];
   const coverMap = {};
@@ -982,6 +1019,12 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     ...(resolvedIdentityType === 'BC_AUTH_TT' ? { identity_authorized_bc_id: identity_bc_id || BC_ID } : {}),
   };
 
+  const cta = row.cta || 'SHOP_NOW';
+  const portfolio_id = await getOrCreateCtaPortfolio(cta, adv_id);
+  const ctaFields = portfolio_id
+    ? { call_to_action_id: portfolio_id }
+    : { call_to_action_list: [{ call_to_action: cta }] };
+
   const creative_list = usableIds.map(video_id => {
     const cover = coverMap[video_id];
     return {
@@ -1002,9 +1045,8 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     const res = await ttPost('/smart_plus/ad/create/', {
       adgroup_id,
       ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
-      ad_configuration: { ...creativeIdentity },
+      ad_configuration: { ...creativeIdentity, ...ctaFields },
       ad_text_list,
-      call_to_action_list: [{ call_to_action: row.cta || 'SHOP_NOW' }],
       landing_page_url_list: [{ landing_page_url: row.url }],
       creative_list: batch,
     }, adv_id);
