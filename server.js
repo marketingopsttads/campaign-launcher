@@ -925,11 +925,11 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
           image_url: cover.url,
           image_name,
         }, adv_id);
-        const image_id = uploadRes.data?.image_id;
-        if (image_id) { console.log(`Cover image_id for ${video_id} frame${frameIdx}: ${image_id}`); return image_id; }
+        const web_uri = uploadRes.data?.web_uri || uploadRes.data?.image_id;
+        if (web_uri) { console.log(`Cover web_uri for ${video_id} frame${frameIdx}: ${web_uri}`); return web_uri; }
         if (uploadRes.code === 40911) {
           console.log(`Frame ${frameIdx} is a duplicate for ${video_id}, trying next frame`);
-          continue; // try the next frame instead of reusing a potentially wrong image_id
+          continue;
         }
         console.warn(`Cover upload failed frame${frameIdx}: code=${uploadRes.code} msg=${uploadRes.message}`);
       }
@@ -1006,22 +1006,23 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
       image_url: row.cover_image,
       image_name: `cover_custom_${Date.now()}`,
     }, adv_id);
-    let image_id = uploadRes.data?.image_id;
-    if (!image_id && uploadRes.code === 40911) {
+    let cover_web_uri = uploadRes.data?.web_uri || (uploadRes.data?.image_id ? uploadRes.data.image_id : null);
+    if (!cover_web_uri && uploadRes.code === 40911) {
       const searchRes = await ttGet('/file/image/ad/search/', { image_urls: JSON.stringify([row.cover_image]) }, adv_id);
-      image_id = searchRes.data?.list?.[0]?.image_id;
-      if (!image_id) {
+      const found = searchRes.data?.list?.[0];
+      cover_web_uri = found?.web_uri || found?.image_id || null;
+      if (!cover_web_uri) {
         const retryRes = await ttPost('/file/image/ad/upload/', {
           upload_type: 'UPLOAD_BY_URL',
           image_url: row.cover_image,
           image_name: `cover_custom_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
         }, adv_id);
-        image_id = retryRes.data?.image_id;
+        cover_web_uri = retryRes.data?.web_uri || retryRes.data?.image_id || null;
       }
     }
-    if (image_id) {
-      customCoverId = image_id;
-      console.log(`Custom cover image uploaded successfully: ${image_id}`);
+    if (cover_web_uri) {
+      customCoverId = cover_web_uri;
+      console.log(`Custom cover image uploaded successfully, web_uri: ${cover_web_uri}`);
     } else {
       // Resolution too low or other upload failure — fall through to per-video suggestcover
       console.warn(`Custom cover image upload failed (code=${uploadRes.code}, msg=${uploadRes.message}) — falling back to auto-generated cover for each video`);
