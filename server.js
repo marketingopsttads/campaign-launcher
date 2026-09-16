@@ -774,8 +774,30 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
     }
     // Check persistent cache first — avoids upload attempt when we already know the ID
     if (videoCache[url]) {
-      const cached_id = videoCache[url];
+      let cached_id = videoCache[url];
       console.log(`Cache hit for ${url}: ${cached_id}`);
+      // Check if this video needs Smart Fix (low-res) — run fix task if so
+      const vidInfo = await ttGet('/file/video/ad/search/', { filtering: JSON.stringify({ video_ids: [cached_id] }) }, adv_id);
+      const vidData = vidInfo.data?.list?.[0];
+      if (vidData && vidData.width < 720) {
+        console.log(`Cached video ${cached_id} is ${vidData.width}x${vidData.height} — triggering Smart Fix`);
+        if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `Video ${videoNum}: upscaling low-res with Smart Fix…` });
+        const fixRes = await ttPost('/video/fix/task/create/', { tasks: [{ video_id: cached_id, auto_bind_enabled: true }] }, adv_id);
+        const task_id = fixRes.data?.[0]?.task_id;
+        if (task_id) {
+          for (let attempt = 0; attempt < 24; attempt++) {
+            await new Promise(r => setTimeout(r, 10000));
+            const taskRes = await ttGet('/video/fix/task/get/', { task_id }, adv_id);
+            const task = taskRes.data;
+            if (task?.status === 'SUCCESS') {
+              const fixed_id = task.fixed_video_id || task.video_id;
+              if (fixed_id) { cached_id = fixed_id; videoCache[url] = fixed_id; console.log(`Smart Fix complete: ${fixed_id}`); }
+              break;
+            }
+            if (task?.status === 'FAILED') { console.warn(`Smart Fix failed for cached ${cached_id}`); break; }
+          }
+        }
+      }
       ids.push(cached_id);
       urlToId[url] = cached_id;
       coverPromises[cached_id] = getVideoCoverImageId(cached_id, adv_id);
@@ -791,8 +813,30 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
         upload_type: 'UPLOAD_BY_URL',
         video_url: url,
         video_name,
+        flaw_detect: true,
+        auto_fix_enabled: true,
+        auto_bind_enabled: true,
       }, adv_id, 120000); // 120s — TikTok fetches & transcodes, can be slow on large files
       let video_id = res.data?.video_id || res.data?.[0]?.video_id;
+
+      // If TikTok flagged low-res and is running Smart Fix, wait for the fixed video
+      const fix_task_id = res.data?.fix_task_id;
+      if (fix_task_id) {
+        console.log(`Video ${videoNum}: Smart Fix running (task ${fix_task_id}), waiting for upscale…`);
+        if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `Video ${videoNum}: upscaling with Smart Fix…` });
+        for (let attempt = 0; attempt < 24; attempt++) {
+          await new Promise(r => setTimeout(r, 10000));
+          const taskRes = await ttGet('/video/fix/task/get/', { task_id: fix_task_id }, adv_id);
+          const task = taskRes.data;
+          console.log(`Smart Fix task ${fix_task_id} attempt ${attempt + 1}: status=${task?.status}`);
+          if (task?.status === 'SUCCESS') {
+            const fixed_id = task.fixed_video_id || task.video_id;
+            if (fixed_id) { video_id = fixed_id; console.log(`Smart Fix complete: ${fixed_id}`); }
+            break;
+          }
+          if (task?.status === 'FAILED') { console.warn(`Smart Fix failed for ${url}`); break; }
+        }
+      }
       // code=0 but no video_id: TikTok queued the transcode — poll by name until it appears
       if (!video_id && res.code === 0) {
         console.log(`Video ${videoNum}: code=0 but no video_id, polling for ${video_name}…`);
