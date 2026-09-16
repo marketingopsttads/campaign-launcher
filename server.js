@@ -906,7 +906,6 @@ async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
 }
 
 async function getVideoCoverImageId(video_id, adv_id = ADV_ID, maxAttempts = 20) {
-  // Suggestcover returns frames with an 'id' field that IS the image_id — no upload needed
   const FRAME_PREFERENCE = [5, 3, 1, 2, 4];
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -917,10 +916,34 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID, maxAttempts = 20)
 
       for (const frameIdx of FRAME_PREFERENCE) {
         const cover = list[frameIdx - 1] || list[0];
-        if (cover?.id) {
-          console.log(`Cover image_id for ${video_id} frame${frameIdx}: ${cover.id}`);
-          return cover.id;
+        if (!cover?.url) continue;
+
+        const uploadRes = await ttPost('/file/image/ad/upload/', {
+          upload_type: 'UPLOAD_BY_URL',
+          image_url: cover.url,
+          image_name: `cover_${video_id}_f${frameIdx}_${Date.now()}`,
+        }, adv_id);
+
+        if (uploadRes.data?.image_id) {
+          console.log(`Cover registered for ${video_id} frame${frameIdx}: ${uploadRes.data.image_id}`);
+          return uploadRes.data.image_id;
         }
+
+        if (uploadRes.code === 40911) {
+          // Duplicate — search for the already-registered image_id
+          const searchRes = await ttGet('/file/image/ad/search/', {
+            image_urls: JSON.stringify([cover.url]),
+          }, adv_id);
+          const existing = searchRes.data?.list?.[0]?.image_id;
+          if (existing) {
+            console.log(`Cover already registered for ${video_id} frame${frameIdx}: ${existing}`);
+            return existing;
+          }
+          console.log(`Frame ${frameIdx} duplicate but not found in search, trying next`);
+          continue;
+        }
+
+        console.warn(`Cover upload failed frame${frameIdx}: code=${uploadRes.code} msg=${uploadRes.message}`);
       }
     } catch (e) {
       console.warn(`suggestcover attempt ${attempt} error for ${video_id}:`, e.message);
