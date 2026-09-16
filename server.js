@@ -1095,7 +1095,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     console.warn(`Ad create rejected custom cover (resolution too low) — falling back to suggestcover for each video`);
     const fallbackMap = {};
     for (const video_id of usableIds) {
-      const image_id = await getVideoCoverImageId(video_id, adv_id);
+      const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
       if (image_id) fallbackMap[video_id] = image_id;
     }
     const fallbackIds = usableIds.filter(id => fallbackMap[id]);
