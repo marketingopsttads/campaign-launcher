@@ -906,7 +906,7 @@ async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
 }
 
 async function getVideoCoverImageId(video_id, adv_id = ADV_ID, maxAttempts = 20) {
-  // Frame preference order: 5, 3, 1, 2, 4 — try each until one uploads without 40911
+  // Suggestcover returns frames with an 'id' field that IS the image_id — no upload needed
   const FRAME_PREFERENCE = [5, 3, 1, 2, 4];
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -915,23 +915,12 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID, maxAttempts = 20)
       console.log(`suggestcover attempt ${attempt} for ${video_id}: code=${res.code} frames=${list.length}`);
       if (!list.length) { await new Promise(r => setTimeout(r, 10000)); continue; }
 
-      // Try each frame in preference order until one is accepted without duplicate
       for (const frameIdx of FRAME_PREFERENCE) {
         const cover = list[frameIdx - 1] || list[0];
-        if (!cover?.url) continue;
-        const image_name = `cover_${video_id}_f${frameIdx}_${Date.now()}`;
-        const uploadRes = await ttPost('/file/image/ad/upload/', {
-          upload_type: 'UPLOAD_BY_URL',
-          image_url: cover.url,
-          image_name,
-        }, adv_id);
-        const image_id = uploadRes.data?.image_id;
-        if (image_id) { console.log(`Cover image_id for ${video_id} frame${frameIdx}: ${image_id}`); return image_id; }
-        if (uploadRes.code === 40911) {
-          console.log(`Frame ${frameIdx} is a duplicate for ${video_id}, trying next frame`);
-          continue;
+        if (cover?.id) {
+          console.log(`Cover image_id for ${video_id} frame${frameIdx}: ${cover.id}`);
+          return cover.id;
         }
-        console.warn(`Cover upload failed frame${frameIdx}: code=${uploadRes.code} msg=${uploadRes.message}`);
       }
     } catch (e) {
       console.warn(`suggestcover attempt ${attempt} error for ${video_id}:`, e.message);
