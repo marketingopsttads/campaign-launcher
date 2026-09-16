@@ -1054,39 +1054,54 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   const portfolio_id = await getOrCreateCtaPortfolio(cta, adv_id);
   console.log(`CTA: ${cta}, portfolio_id: ${portfolio_id}`);
 
-  const creative_list = usableIds.map(video_id => {
-    const cover = coverMap[video_id];
-    return {
-      creative_info: {
-        ad_format: 'SINGLE_VIDEO',
-        video_info: { video_id },
-        image_info: [{ web_uri: cover }],
-        aigc_disclosure_type: 'SELF_DISCLOSURE',
-        ...creativeIdentity,
-      },
-    };
-  });
-
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
-  for (let i = 0; i < creative_list.length; i += 50) {
-    const batch = creative_list.slice(i, i + 50);
-    const postBody = {
-      adgroup_id,
-      ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
-      ad_configuration: {
-        ...creativeIdentity,
-        ...(portfolio_id ? { call_to_action_id: portfolio_id } : {}),
-      },
-      ad_text_list,
-      landing_page_url_list: [{ landing_page_url: row.url }],
-      creative_list: batch,
-      ...(!portfolio_id ? { call_to_action_list: [{ call_to_action: cta }] } : {}),
-    };
-    console.log('smart_plus/ad/create body (excl creatives):', JSON.stringify({ ...postBody, creative_list: `[${batch.length} items]` }));
-    const res = await ttPost('/smart_plus/ad/create/', postBody, adv_id);
-    if (res.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(res)}`);
+  const buildCreativeList = (ids, covers) => ids.map(video_id => ({
+    creative_info: {
+      ad_format: 'SINGLE_VIDEO',
+      video_info: { video_id },
+      image_info: [{ web_uri: covers[video_id] }],
+      aigc_disclosure_type: 'SELF_DISCLOSURE',
+      ...creativeIdentity,
+    },
+  }));
+
+  const tryCreateAds = async (ids, covers) => {
+    const list = buildCreativeList(ids, covers);
+    for (let i = 0; i < list.length; i += 50) {
+      const batch = list.slice(i, i + 50);
+      const postBody = {
+        adgroup_id,
+        ad_name: `${row.campaign_name}_ad_${Math.floor(i / 50) + 1}`,
+        ad_configuration: {
+          ...creativeIdentity,
+          ...(portfolio_id ? { call_to_action_id: portfolio_id } : {}),
+        },
+        ad_text_list,
+        landing_page_url_list: [{ landing_page_url: row.url }],
+        creative_list: batch,
+        ...(!portfolio_id ? { call_to_action_list: [{ call_to_action: cta }] } : {}),
+      };
+      console.log('smart_plus/ad/create body (excl creatives):', JSON.stringify({ ...postBody, creative_list: `[${batch.length} items]` }));
+      const res = await ttPost('/smart_plus/ad/create/', postBody, adv_id);
+      if (res.code !== 0) return res;
+    }
+    return { code: 0 };
+  };
+
+  let createRes = await tryCreateAds(usableIds, coverMap);
+  if (createRes.code === 40002 && createRes.message?.toLowerCase().includes('resolution') && customCoverId) {
+    console.warn(`Ad create rejected custom cover (resolution too low) — falling back to suggestcover for each video`);
+    const fallbackMap = {};
+    for (const video_id of usableIds) {
+      const image_id = await getVideoCoverImageId(video_id, adv_id);
+      if (image_id) fallbackMap[video_id] = image_id;
+    }
+    const fallbackIds = usableIds.filter(id => fallbackMap[id]);
+    if (!fallbackIds.length) throw new Error(`Ad create failed and suggestcover fallback produced no covers`);
+    createRes = await tryCreateAds(fallbackIds, fallbackMap);
   }
+  if (createRes.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(createRes)}`);
 }
 
 // ── Deploy version ping ────────────────────────────────────────────────────
