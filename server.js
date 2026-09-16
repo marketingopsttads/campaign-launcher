@@ -1060,7 +1060,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     creative_info: {
       ad_format: 'SINGLE_VIDEO',
       video_info: { video_id },
-      image_info: [{ image_id: covers[video_id] }],
+      image_info: [{ web_uri: covers[video_id] }],
       aigc_disclosure_type: 'SELF_DISCLOSURE',
       ...creativeIdentity,
     },
@@ -1091,16 +1091,14 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   let createRes = await tryCreateAds(usableIds, coverMap);
   if (createRes.code === 40002 && customCoverId) {
-    console.warn(`Ad create rejected custom cover (code=40002) — falling back to suggestcover for each video`);
+    console.warn(`Ad create rejected custom cover (code=40002) — falling back to pre-fetched suggestcover`);
     const fallbackMap = {};
     for (const video_id of usableIds) {
-      // Try pre-fetched promise first; if it resolved to null, call fresh (videos may have finished processing by now)
-      let image_id = await coverPromises[video_id];
-      if (!image_id) image_id = await getVideoCoverImageId(video_id, adv_id);
+      const image_id = await coverPromises[video_id];
       if (image_id) fallbackMap[video_id] = image_id;
     }
     const fallbackIds = usableIds.filter(id => fallbackMap[id]);
-    if (!fallbackIds.length) throw new Error(`Ad create failed (code=${createRes.code}: ${createRes.message}) and suggestcover fallback also produced no covers — videos may still be processing on TikTok`);
+    if (!fallbackIds.length) throw new Error(`Ad create failed (code=${createRes.code}: ${createRes.message}) — custom cover rejected and no suggestcover was pre-fetched`);
     createRes = await tryCreateAds(fallbackIds, fallbackMap);
   }
   if (createRes.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(createRes)}`);
