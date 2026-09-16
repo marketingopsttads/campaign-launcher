@@ -995,53 +995,8 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
 }
 
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises, adv_id) {
-  const dedupedIds = [...new Set(video_ids)];
-  const coverMap = {};
-
-  let customCoverId = null;
-  if (row.cover_image) {
-    console.log(`Attempting user-supplied cover image: ${row.cover_image}`);
-    const uploadRes = await ttPost('/file/image/ad/upload/', {
-      upload_type: 'UPLOAD_BY_URL',
-      image_url: row.cover_image,
-      image_name: `cover_custom_${Date.now()}`,
-    }, adv_id);
-    let cover_image_id = uploadRes.data?.image_id || null;
-    if (!cover_image_id && uploadRes.code === 40911) {
-      const searchRes = await ttGet('/file/image/ad/search/', { image_urls: JSON.stringify([row.cover_image]) }, adv_id);
-      cover_image_id = searchRes.data?.list?.[0]?.image_id || null;
-      if (!cover_image_id) {
-        const retryRes = await ttPost('/file/image/ad/upload/', {
-          upload_type: 'UPLOAD_BY_URL',
-          image_url: row.cover_image,
-          image_name: `cover_custom_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
-        }, adv_id);
-        cover_image_id = retryRes.data?.image_id || null;
-      }
-    }
-    if (cover_image_id) {
-      customCoverId = cover_image_id;
-      console.log(`Custom cover uploaded, image_id: ${cover_image_id}`);
-    } else {
-      // Resolution too low or other upload failure — fall through to per-video suggestcover
-      console.warn(`Custom cover image upload failed (code=${uploadRes.code}, msg=${uploadRes.message}) — falling back to auto-generated cover for each video`);
-    }
-  }
-
-  for (const video_id of dedupedIds) {
-    if (customCoverId) {
-      coverMap[video_id] = customCoverId;
-    } else {
-      const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
-      if (image_id) coverMap[video_id] = image_id;
-      else console.warn(`Skipping video ${video_id} — cover image unavailable after all retries`);
-    }
-  }
-
-  const usableIds = dedupedIds.filter(id => coverMap[id]);
-  if (!usableIds.length) throw new Error('No videos had usable cover images — all were skipped');
-  const skipped = dedupedIds.length - usableIds.length;
-  if (skipped) console.warn(`${skipped} video(s) skipped due to missing covers`);
+  const usableIds = [...new Set(video_ids)];
+  if (!usableIds.length) throw new Error('No video IDs provided');
 
   const resolvedIdentityType = identity_type || 'BC_AUTH_TT';
   const creativeIdentity = {
@@ -1056,18 +1011,17 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
-  const buildCreativeList = (ids, covers) => ids.map(video_id => ({
+  const buildCreativeList = (ids) => ids.map(video_id => ({
     creative_info: {
       ad_format: 'SINGLE_VIDEO',
       video_info: { video_id },
-      image_info: [{ web_uri: covers[video_id] }],
       aigc_disclosure_type: 'SELF_DISCLOSURE',
       ...creativeIdentity,
     },
   }));
 
-  const tryCreateAds = async (ids, covers) => {
-    const list = buildCreativeList(ids, covers);
+  const tryCreateAds = async (ids) => {
+    const list = buildCreativeList(ids);
     for (let i = 0; i < list.length; i += 50) {
       const batch = list.slice(i, i + 50);
       const postBody = {
@@ -1089,18 +1043,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     return { code: 0 };
   };
 
-  let createRes = await tryCreateAds(usableIds, coverMap);
-  if (createRes.code === 40002 && customCoverId) {
-    console.warn(`Ad create rejected custom cover (code=40002) — falling back to pre-fetched suggestcover`);
-    const fallbackMap = {};
-    for (const video_id of usableIds) {
-      const image_id = await coverPromises[video_id];
-      if (image_id) fallbackMap[video_id] = image_id;
-    }
-    const fallbackIds = usableIds.filter(id => fallbackMap[id]);
-    if (!fallbackIds.length) throw new Error(`Ad create failed (code=${createRes.code}: ${createRes.message}) — custom cover rejected and no suggestcover was pre-fetched`);
-    createRes = await tryCreateAds(fallbackIds, fallbackMap);
-  }
+  const createRes = await tryCreateAds(usableIds);
   if (createRes.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(createRes)}`);
 }
 
