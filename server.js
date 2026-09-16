@@ -905,10 +905,10 @@ async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
   }, adv_id);
 }
 
-async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
+async function getVideoCoverImageId(video_id, adv_id = ADV_ID, maxAttempts = 20) {
   // Frame preference order: 5, 3, 1, 2, 4 — try each until one uploads without 40911
   const FRAME_PREFERENCE = [5, 3, 1, 2, 4];
-  for (let attempt = 1; attempt <= 20; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const res = await ttGet('/file/video/suggestcover/', { video_id, poster_number: 5 }, adv_id);
       const list = res.data?.list || [];
@@ -995,8 +995,28 @@ async function getOrCreateCtaPortfolio(cta, adv_id) {
 }
 
 async function createAds(row, adgroup_id, video_ids, identity_id, identity_type, identity_bc_id, coverPromises, adv_id) {
-  const usableIds = [...new Set(video_ids)];
-  if (!usableIds.length) throw new Error('No video IDs provided');
+  const dedupedIds = [...new Set(video_ids)];
+
+  // Await all cover promises in parallel (they've been running since upload started)
+  // Cap total wait at 90s; any that resolve to null get skipped
+  const coverMap = {};
+  await Promise.all(dedupedIds.map(async (video_id) => {
+    const existing = coverPromises[video_id];
+    let image_id = existing ? await Promise.race([
+      existing,
+      new Promise(r => setTimeout(() => r(null), 90000)),
+    ]) : null;
+    if (!image_id) {
+      // Quick retry — fewer attempts since some time has passed since upload
+      image_id = await getVideoCoverImageId(video_id, adv_id, 3);
+    }
+    if (image_id) coverMap[video_id] = image_id;
+    else console.warn(`No cover image available for ${video_id} — skipping`);
+  }));
+
+  const usableIds = dedupedIds.filter(id => coverMap[id]);
+  if (!usableIds.length) throw new Error('No videos had usable cover images');
+  if (usableIds.length < dedupedIds.length) console.warn(`${dedupedIds.length - usableIds.length} video(s) skipped — no cover`);
 
   const resolvedIdentityType = identity_type || 'BC_AUTH_TT';
   const creativeIdentity = {
@@ -1011,17 +1031,18 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
 
   const ad_text_list = row.headlines.slice(0, 5).map(h => ({ ad_text: h }));
 
-  const buildCreativeList = (ids) => ids.map(video_id => ({
+  const buildCreativeList = (ids, covers) => ids.map(video_id => ({
     creative_info: {
       ad_format: 'SINGLE_VIDEO',
       video_info: { video_id },
+      image_info: [{ web_uri: covers[video_id] }],
       aigc_disclosure_type: 'SELF_DISCLOSURE',
       ...creativeIdentity,
     },
   }));
 
   const tryCreateAds = async (ids) => {
-    const list = buildCreativeList(ids);
+    const list = buildCreativeList(ids, coverMap);
     for (let i = 0; i < list.length; i += 50) {
       const batch = list.slice(i, i + 50);
       const postBody = {
