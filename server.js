@@ -48,12 +48,12 @@ async function ttGet(path, params = {}, adv_id = ADV_ID) {
   return res.json();
 }
 
-async function ttPost(path, body, adv_id = ADV_ID) {
+async function ttPost(path, body, adv_id = ADV_ID, timeoutMs = 30000) {
   const res = await fetchWithTimeout(`${TT_BASE}${path}`, {
     method: 'POST',
     headers: { 'Access-Token': getToken(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ advertiser_id: adv_id, ...body }),
-  }, 30000);
+  }, timeoutMs);
   return res.json();
 }
 
@@ -791,10 +791,19 @@ async function uploadVideos(urls, adv_id, jobId, rowIndex) {
         upload_type: 'UPLOAD_BY_URL',
         video_url: url,
         video_name,
-        flaw_detect: true,
-        auto_fix_enabled: true,
-      }, adv_id);
-      const video_id = res.data?.video_id || res.data?.[0]?.video_id;
+      }, adv_id, 120000); // 120s — TikTok fetches & transcodes, can be slow on large files
+      let video_id = res.data?.video_id || res.data?.[0]?.video_id;
+      // code=0 but no video_id: TikTok queued the transcode — poll by name until it appears
+      if (!video_id && res.code === 0) {
+        console.log(`Video ${videoNum}: code=0 but no video_id, polling for ${video_name}…`);
+        if (jobId) jobEmit(jobId, { type: 'step', rowIndex, step: `Video ${videoNum}: processing, waiting…` });
+        for (let attempt = 0; attempt < 12; attempt++) {
+          await new Promise(r => setTimeout(r, 10000)); // wait 10s between checks
+          const found = await findExistingVideo(video_name, adv_id);
+          if (found) { video_id = found; break; }
+        }
+        if (!video_id) console.warn(`Video ${videoNum}: timed out waiting for TikTok to process ${url}`);
+      }
       if (video_id) {
         ids.push(video_id);
         urlToId[url] = video_id;
@@ -1102,6 +1111,23 @@ app.get('/api/reporting/debug', requireAuth, async (req, res) => {
     campList: campList.status === 'fulfilled' ? campList.value : { error: campList.reason?.message },
     reportData: reportData.status === 'fulfilled' ? reportData.value : { error: reportData.reason?.message },
   });
+});
+
+// GET /api/debug-upload?url=...&adv_id=... — test a single video URL upload
+app.get('/api/debug-upload', requireAuth, async (req, res) => {
+  const { url, adv_id = ADV_ID } = req.query;
+  if (!url) return res.status(400).json({ error: 'url param required' });
+  const video_name = `debug_${Date.now()}`;
+  try {
+    const uploadRes = await ttPost('/file/video/ad/upload/', {
+      upload_type: 'UPLOAD_BY_URL',
+      video_url: url,
+      video_name,
+    }, adv_id, 120000);
+    res.json({ url, video_name, response: uploadRes });
+  } catch (e) {
+    res.json({ url, error: e.message });
+  }
 });
 
 // ── Reporting helpers ──────────────────────────────────────────────────────
