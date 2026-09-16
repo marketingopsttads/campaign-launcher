@@ -998,9 +998,9 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   const dedupedIds = [...new Set(video_ids)];
   const coverMap = {};
 
+  let customCoverId = null;
   if (row.cover_image) {
-    // User-supplied cover image URL — upload it once and use for all videos
-    console.log(`Using user-supplied cover image: ${row.cover_image}`);
+    console.log(`Attempting user-supplied cover image: ${row.cover_image}`);
     const uploadRes = await ttPost('/file/image/ad/upload/', {
       upload_type: 'UPLOAD_BY_URL',
       image_url: row.cover_image,
@@ -1008,11 +1008,9 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     }, adv_id);
     let image_id = uploadRes.data?.image_id;
     if (!image_id && uploadRes.code === 40911) {
-      // TikTok already has this image — reuse the existing one by searching
       const searchRes = await ttGet('/file/image/ad/search/', { image_urls: JSON.stringify([row.cover_image]) }, adv_id);
       image_id = searchRes.data?.list?.[0]?.image_id;
       if (!image_id) {
-        // Fallback: retry with a unique name variation
         const retryRes = await ttPost('/file/image/ad/upload/', {
           upload_type: 'UPLOAD_BY_URL',
           image_url: row.cover_image,
@@ -1021,10 +1019,19 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
         image_id = retryRes.data?.image_id;
       }
     }
-    if (!image_id) throw new Error(`Failed to upload custom cover image: ${JSON.stringify(uploadRes)}`);
-    dedupedIds.forEach(id => { coverMap[id] = image_id; });
-  } else {
-    for (const video_id of dedupedIds) {
+    if (image_id) {
+      customCoverId = image_id;
+      console.log(`Custom cover image uploaded successfully: ${image_id}`);
+    } else {
+      // Resolution too low or other upload failure — fall through to per-video suggestcover
+      console.warn(`Custom cover image upload failed (code=${uploadRes.code}, msg=${uploadRes.message}) — falling back to auto-generated cover for each video`);
+    }
+  }
+
+  for (const video_id of dedupedIds) {
+    if (customCoverId) {
+      coverMap[video_id] = customCoverId;
+    } else {
       const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
       if (image_id) coverMap[video_id] = image_id;
       else console.warn(`Skipping video ${video_id} — cover image unavailable after all retries`);
