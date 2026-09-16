@@ -925,8 +925,8 @@ async function getVideoCoverImageId(video_id, adv_id = ADV_ID) {
           image_url: cover.url,
           image_name,
         }, adv_id);
-        const web_uri = uploadRes.data?.web_uri || uploadRes.data?.image_id;
-        if (web_uri) { console.log(`Cover web_uri for ${video_id} frame${frameIdx}: ${web_uri}`); return web_uri; }
+        const image_id = uploadRes.data?.image_id;
+        if (image_id) { console.log(`Cover image_id for ${video_id} frame${frameIdx}: ${image_id}`); return image_id; }
         if (uploadRes.code === 40911) {
           console.log(`Frame ${frameIdx} is a duplicate for ${video_id}, trying next frame`);
           continue;
@@ -1006,23 +1006,22 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
       image_url: row.cover_image,
       image_name: `cover_custom_${Date.now()}`,
     }, adv_id);
-    let cover_web_uri = uploadRes.data?.web_uri || (uploadRes.data?.image_id ? uploadRes.data.image_id : null);
-    if (!cover_web_uri && uploadRes.code === 40911) {
+    let cover_image_id = uploadRes.data?.image_id || null;
+    if (!cover_image_id && uploadRes.code === 40911) {
       const searchRes = await ttGet('/file/image/ad/search/', { image_urls: JSON.stringify([row.cover_image]) }, adv_id);
-      const found = searchRes.data?.list?.[0];
-      cover_web_uri = found?.web_uri || found?.image_id || null;
-      if (!cover_web_uri) {
+      cover_image_id = searchRes.data?.list?.[0]?.image_id || null;
+      if (!cover_image_id) {
         const retryRes = await ttPost('/file/image/ad/upload/', {
           upload_type: 'UPLOAD_BY_URL',
           image_url: row.cover_image,
           image_name: `cover_custom_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
         }, adv_id);
-        cover_web_uri = retryRes.data?.web_uri || retryRes.data?.image_id || null;
+        cover_image_id = retryRes.data?.image_id || null;
       }
     }
-    if (cover_web_uri) {
-      customCoverId = cover_web_uri;
-      console.log(`Custom cover image uploaded successfully, web_uri: ${cover_web_uri}`);
+    if (cover_image_id) {
+      customCoverId = cover_image_id;
+      console.log(`Custom cover uploaded, image_id: ${cover_image_id}`);
     } else {
       // Resolution too low or other upload failure — fall through to per-video suggestcover
       console.warn(`Custom cover image upload failed (code=${uploadRes.code}, msg=${uploadRes.message}) — falling back to auto-generated cover for each video`);
@@ -1061,7 +1060,7 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
     creative_info: {
       ad_format: 'SINGLE_VIDEO',
       video_info: { video_id },
-      image_info: [{ web_uri: covers[video_id] }],
+      image_info: [{ image_id: covers[video_id] }],
       aigc_disclosure_type: 'SELF_DISCLOSURE',
       ...creativeIdentity,
     },
@@ -1091,15 +1090,17 @@ async function createAds(row, adgroup_id, video_ids, identity_id, identity_type,
   };
 
   let createRes = await tryCreateAds(usableIds, coverMap);
-  if (createRes.code === 40002 && createRes.message?.toLowerCase().includes('resolution') && customCoverId) {
-    console.warn(`Ad create rejected custom cover (resolution too low) — falling back to suggestcover for each video`);
+  if (createRes.code === 40002 && customCoverId) {
+    console.warn(`Ad create rejected custom cover (code=40002) — falling back to suggestcover for each video`);
     const fallbackMap = {};
     for (const video_id of usableIds) {
-      const image_id = await (coverPromises[video_id] || getVideoCoverImageId(video_id, adv_id));
+      // Try pre-fetched promise first; if it resolved to null, call fresh (videos may have finished processing by now)
+      let image_id = await coverPromises[video_id];
+      if (!image_id) image_id = await getVideoCoverImageId(video_id, adv_id);
       if (image_id) fallbackMap[video_id] = image_id;
     }
     const fallbackIds = usableIds.filter(id => fallbackMap[id]);
-    if (!fallbackIds.length) throw new Error(`Ad create failed and suggestcover fallback produced no covers`);
+    if (!fallbackIds.length) throw new Error(`Ad create failed (code=${createRes.code}: ${createRes.message}) and suggestcover fallback also produced no covers — videos may still be processing on TikTok`);
     createRes = await tryCreateAds(fallbackIds, fallbackMap);
   }
   if (createRes.code !== 0) throw new Error(`Ad create failed: ${JSON.stringify(createRes)}`);
