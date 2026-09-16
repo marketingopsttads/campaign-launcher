@@ -104,6 +104,22 @@
     .pill-age35 { background: #3b1f5e; color: #c084fc; }
     .pill-lowest { background: #14532d; color: #4ade80; }
     .pill-costcap { background: #451a03; color: #fb923c; }
+    /* ── Row selection ── */
+    .row-cb { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
+    tbody tr.selected td { background: #1a1a35; }
+    .selection-bar {
+      display: none; align-items: center; gap: 12px;
+      background: #1e1e2e; border: 1px solid #2d2d3f; border-radius: 8px;
+      padding: 8px 14px; margin-bottom: 12px; font-size: 0.82rem; color: #94a3b8;
+    }
+    .selection-bar.visible { display: flex; }
+    .btn-deploy-sel {
+      background: #6366f1; color: #fff; border: none; border-radius: 6px;
+      padding: 6px 14px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: background 0.15s; white-space: nowrap;
+    }
+    .btn-deploy-sel:hover { background: #4f46e5; }
+    .btn-sel-all { background: none; border: none; color: #6366f1; font-size: 0.82rem; cursor: pointer; padding: 0; }
+    .btn-sel-all:hover { text-decoration: underline; }
     .pill-pending { background: #1e1e2e; color: #64748b; }
     .pill-running { background: #1e3a5f; color: #60a5fa; }
     .pill-done { background: #14532d; color: #4ade80; }
@@ -221,12 +237,20 @@
       <div id="preview-section">
         <div class="section-header">
           <h2>Campaign Preview <span id="row-count" style="color:#64748b;font-weight:400;font-size:0.85rem;"></span></h2>
-          <button class="btn-deploy" id="deploy-btn">Deploy All Campaigns</button>
+          <button class="btn-deploy" id="deploy-btn">Deploy All</button>
+        </div>
+        <!-- Selection bar -->
+        <div class="selection-bar" id="selection-bar">
+          <span id="sel-count-label">0 selected</span>
+          <button class="btn-deploy-sel" id="deploy-sel-btn">Deploy Selected</button>
+          <button class="btn-sel-all" onclick="selectAll()">Select All</button>
+          <button class="btn-sel-all" onclick="clearSelection()">Clear</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
+                <th style="width:36px;text-align:center;"><input type="checkbox" class="row-cb" id="cb-all" title="Select all" onchange="toggleAllRows(this)"></th>
                 <th>#</th>
                 <th>Account</th>
                 <th>Identity</th>
@@ -289,6 +313,57 @@ let parsedRows = [];
 let accounts = [];
 let deploying = false;
 let currentJobId = null;
+let selectedIdxs = new Set();
+
+function onRowCbChange(cb) {
+  const idx = parseInt(cb.dataset.idx);
+  if (cb.checked) selectedIdxs.add(idx);
+  else selectedIdxs.delete(idx);
+  document.getElementById(`row-${idx}`).classList.toggle('selected', cb.checked);
+  syncSelectionUI();
+}
+
+function toggleAllRows(masterCb) {
+  document.querySelectorAll('.row-cb[data-idx]').forEach(cb => {
+    cb.checked = masterCb.checked;
+    const idx = parseInt(cb.dataset.idx);
+    if (masterCb.checked) selectedIdxs.add(idx);
+    else selectedIdxs.delete(idx);
+    document.getElementById(`row-${idx}`).classList.toggle('selected', masterCb.checked);
+  });
+  syncSelectionUI();
+}
+
+function selectAll() {
+  document.getElementById('cb-all').checked = true;
+  toggleAllRows(document.getElementById('cb-all'));
+}
+
+function clearSelection() {
+  selectedIdxs.clear();
+  document.querySelectorAll('.row-cb').forEach(cb => { cb.checked = false; });
+  document.querySelectorAll('tbody tr').forEach(tr => tr.classList.remove('selected'));
+  syncSelectionUI();
+}
+
+function syncSelectionUI() {
+  const n = selectedIdxs.size;
+  const total = parsedRows.length;
+  const bar = document.getElementById('selection-bar');
+  const deployBtn = document.getElementById('deploy-btn');
+  if (n > 0 && n < total) {
+    bar.classList.add('visible');
+    document.getElementById('sel-count-label').textContent = `${n} of ${total} selected`;
+    document.getElementById('deploy-sel-btn').textContent = `Deploy Selected (${n})`;
+    deployBtn.textContent = `Deploy All (${total})`;
+  } else if (n === total && total > 0) {
+    bar.classList.remove('visible');
+    deployBtn.textContent = `Deploy All (${total})`;
+  } else {
+    bar.classList.remove('visible');
+    deployBtn.textContent = `Deploy All (${total || ''})`.trim();
+  }
+}
 
 async function togglePause() {
   if (!currentJobId) return;
@@ -405,7 +480,9 @@ document.getElementById('parse-btn').addEventListener('click', async () => {
   if (!res.ok) { alert('Failed to parse file: ' + (await res.json()).error); return; }
   const { rows } = await res.json();
   parsedRows = rows;
+  selectedIdxs.clear();
   renderTable(rows);
+  syncSelectionUI();
   document.getElementById('preview-section').style.display = 'block';
 
   const invalidCount = rows.filter(r => r.validationErrors?.length).length;
@@ -447,6 +524,7 @@ function rowHtml(r) {
     : '';
 
   return `<tr id="row-${r.rowIndex}" style="${rowStyle}">
+    <td style="text-align:center;"><input type="checkbox" class="row-cb" data-idx="${r.rowIndex}" onchange="onRowCbChange(this)"></td>
     <td>${r.rowIndex + 1}${errorsHtml}</td>
     <td style="font-size:0.75rem;color:${hasErrors && !r.account_name ? '#f87171' : '#94a3b8'}">${esc(r.account_name || '—')}</td>
     <td style="font-size:0.75rem;color:${hasErrors && !r.identity_name ? '#f87171' : '#94a3b8'}">${esc(r.identity_name || '—')}</td>
@@ -484,14 +562,15 @@ function esc(s) {
 }
 
 // ── Deploy ────────────────────────────────────────────────────────────────
-document.getElementById('deploy-btn').addEventListener('click', async () => {
+async function startDeploy(rowsToDeploy) {
   if (deploying) return;
-  if (!parsedRows.length) return;
-  if (!confirm(`Deploy ${parsedRows.length} campaign(s) to TikTok?`)) return;
+  if (!rowsToDeploy.length) return;
+  if (!confirm(`Deploy ${rowsToDeploy.length} campaign(s) to TikTok?`)) return;
 
   deploying = true;
   currentJobId = null;
   document.getElementById('deploy-btn').disabled = true;
+  document.getElementById('deploy-sel-btn').disabled = true;
   document.getElementById('parse-btn').disabled = true;
   document.getElementById('progress-bar-wrap').style.display = 'block';
   const pauseBtn = document.getElementById('pause-btn');
@@ -502,12 +581,12 @@ document.getElementById('deploy-btn').addEventListener('click', async () => {
 
   const res = await fetch('/api/deploy', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows: parsedRows, accountsMap }),
+    body: JSON.stringify({ rows: rowsToDeploy, accountsMap }),
   });
   const { jobId } = await res.json();
 
   let done = 0;
-  const total = parsedRows.length;
+  const total = rowsToDeploy.length;
 
   currentJobId = jobId;
   const evtSource = new EventSource(`/api/deploy/${jobId}/events`);
@@ -543,11 +622,18 @@ document.getElementById('deploy-btn').addEventListener('click', async () => {
       deploying = false;
       currentJobId = null;
       document.getElementById('deploy-btn').disabled = false;
+      document.getElementById('deploy-sel-btn').disabled = false;
       document.getElementById('parse-btn').disabled = false;
       document.getElementById('pause-btn').style.display = 'none';
       document.getElementById('progress-label-text').textContent = 'Deployment complete';
     }
   };
+}
+
+document.getElementById('deploy-btn').addEventListener('click', () => startDeploy(parsedRows));
+document.getElementById('deploy-sel-btn').addEventListener('click', () => {
+  const rows = parsedRows.filter(r => selectedIdxs.has(r.rowIndex));
+  startDeploy(rows);
 });
 
 function setProgress(done, total) {
