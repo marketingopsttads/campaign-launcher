@@ -1107,8 +1107,8 @@ app.get('/api/reporting/debug', requireAuth, async (req, res) => {
 // ── Reporting helpers ──────────────────────────────────────────────────────
 // Full validated metric names from TikTok Basic Report API docs v1.3
 // Grouped so we can drop categories if the account doesn't support them
-const METRICS_CORE = ['spend', 'billed_cost', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc', 'reach', 'frequency', 'cost_per_1000_reached'];
-const METRICS_RESULT = ['result', 'cost_per_result', 'result_rate', 'real_time_result', 'real_time_cost_per_result', 'real_time_result_rate', 'secondary_goal_result', 'cost_per_secondary_goal_result', 'secondary_goal_result_rate'];
+const METRICS_CORE = ['spend', 'impressions', 'clicks', 'ctr', 'cpm', 'cpc', 'reach', 'frequency'];
+const METRICS_RESULT = ['conversion', 'cost_per_conversion', 'conversion_rate', 'real_time_conversion', 'real_time_cost_per_conversion', 'result', 'cost_per_result', 'result_rate'];
 const METRICS_VIDEO = ['video_play_actions', 'video_watched_2s', 'video_watched_6s', 'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100', 'average_video_play', 'average_video_play_per_user', 'engaged_view'];
 const METRICS_ENGAGEMENT = ['engagements', 'engagement_rate', 'follows', 'likes', 'comments', 'shares', 'profile_visits', 'profile_visits_rate'];
 

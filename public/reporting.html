@@ -466,19 +466,19 @@ function renderSummary(rows) {
   const sum = (k) => rows.reduce((a,r) => a + (parseFloat(r[k]) || 0), 0);
   const avg = (k) => rows.length ? sum(k) / rows.length : 0;
   const fmtDollar = v => '$' + v.toFixed(2);
-  const fmtPct = v => (v*100).toFixed(2) + '%';
+  const fmtPct = v => v.toFixed(2) + '%';   // TikTok already returns pct values (1.52 = 1.52%)
   const fmtNum = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(1)+'K' : v.toFixed(0);
   const totSpend = sum('spend');
   const totImpr = sum('impressions');
   const totClicks = sum('clicks');
-  const totReach = sum('reach');
-  const totResults = sum('result');
-  const totCostPerResult = totResults > 0 ? totSpend / totResults : 0;
-  const totCTR = totImpr > 0 ? (totClicks / totImpr) : 0;
+  const totConv = sum('conversion');
+  const totCostPerConv = totConv > 0 ? totSpend / totConv : 0;
+  const totConvRate = totClicks > 0 ? (totConv / totClicks * 100) : 0;
   const totCPM = totImpr > 0 ? (totSpend / totImpr * 1000) : 0;
   const totCPC = totClicks > 0 ? (totSpend / totClicks) : 0;
-  const totVV = sum('video_play_actions');
-  const totEng = sum('engagements');
+  // CTR: average the per-row values TikTok already computed as percentages
+  const ctrRows = rows.filter(r => parseFloat(r.ctr) > 0);
+  const totCTR = ctrRows.length ? ctrRows.reduce((a,r) => a + parseFloat(r.ctr), 0) / ctrRows.length : 0;
   const cards = [
     { label: 'Spend', value: fmtDollar(totSpend), cls: 'yellow' },
     { label: 'Impressions', value: fmtNum(totImpr), cls: '' },
@@ -486,10 +486,9 @@ function renderSummary(rows) {
     { label: 'CTR', value: fmtPct(totCTR), cls: 'blue' },
     { label: 'CPM', value: fmtDollar(totCPM), cls: '' },
     { label: 'CPC', value: fmtDollar(totCPC), cls: '' },
-    { label: 'Results', value: fmtNum(totResults), cls: 'green' },
-    { label: 'Cost/Result', value: fmtDollar(totCostPerResult), cls: '' },
-    { label: 'Reach', value: fmtNum(totReach), cls: '' },
-    { label: 'Video Views', value: fmtNum(totVV), cls: '' },
+    { label: 'Conversions', value: fmtNum(totConv), cls: 'green' },
+    { label: 'Conv. Rate', value: fmtPct(totConvRate), cls: '' },
+    { label: 'Cost/Conv.', value: fmtDollar(totCostPerConv), cls: '' },
   ];
   grid.innerHTML = cards.map(c =>
     `<div class="stat-card"><div class="stat-label">${c.label}</div><div class="stat-value ${c.cls}">${c.value}</div></div>`
@@ -506,10 +505,9 @@ const COLS_CAMPAIGNS = [
   { key: 'ctr', label: 'CTR', fmt: 'pct' },
   { key: 'cpm', label: 'CPM', fmt: 'dollar' },
   { key: 'cpc', label: 'CPC', fmt: 'dollar' },
-  { key: 'result', label: 'Results', fmt: 'num' },
-  { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
-  { key: 'reach', label: 'Reach', fmt: 'num' },
-  { key: 'video_play_actions', label: 'Video Views', fmt: 'num' },
+  { key: 'conversion', label: 'Conversions', fmt: 'num' },
+  { key: 'conversion_rate', label: 'Conv. Rate', fmt: 'pct' },
+  { key: 'cost_per_conversion', label: 'Cost/Conv.', fmt: 'dollar' },
 ];
 
 const COLS_ADGROUPS = [
@@ -523,10 +521,9 @@ const COLS_ADGROUPS = [
   { key: 'ctr', label: 'CTR', fmt: 'pct' },
   { key: 'cpm', label: 'CPM', fmt: 'dollar' },
   { key: 'cpc', label: 'CPC', fmt: 'dollar' },
-  { key: 'result', label: 'Results', fmt: 'num' },
-  { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
-  { key: 'reach', label: 'Reach', fmt: 'num' },
-  { key: 'video_play_actions', label: 'Video Views', fmt: 'num' },
+  { key: 'conversion', label: 'Conversions', fmt: 'num' },
+  { key: 'conversion_rate', label: 'Conv. Rate', fmt: 'pct' },
+  { key: 'cost_per_conversion', label: 'Cost/Conv.', fmt: 'dollar' },
 ];
 
 const COLS_ADS = [
@@ -538,10 +535,9 @@ const COLS_ADS = [
   { key: 'ctr', label: 'CTR', fmt: 'pct' },
   { key: 'cpm', label: 'CPM', fmt: 'dollar' },
   { key: 'cpc', label: 'CPC', fmt: 'dollar' },
-  { key: 'result', label: 'Results', fmt: 'num' },
-  { key: 'cost_per_result', label: 'Cost/Result', fmt: 'dollar' },
-  { key: 'reach', label: 'Reach', fmt: 'num' },
-  { key: 'video_play_actions', label: 'Video Views', fmt: 'num' },
+  { key: 'conversion', label: 'Conversions', fmt: 'num' },
+  { key: 'conversion_rate', label: 'Conv. Rate', fmt: 'pct' },
+  { key: 'cost_per_conversion', label: 'Cost/Conv.', fmt: 'dollar' },
 ];
 
 function getCols(level) {
@@ -562,10 +558,10 @@ function fmtCell(row, col) {
     return `<span style="color:var(--muted)">—</span>`;
   }
   const n = parseFloat(v);
-  if (col.fmt === 'dollar') return isNaN(n) || n === 0 ? '—' : '$' + n.toFixed(2);
-  if (col.fmt === 'pct')    return isNaN(n) || n === 0 ? '—' : (n*100).toFixed(2) + '%';
-  if (col.fmt === 'num')    return isNaN(n) || n === 0 ? '—' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : n.toFixed(0);
-  if (col.fmt === 'num2')   return isNaN(n) ? '—' : n.toFixed(2);
+  if (col.fmt === 'dollar')  return isNaN(n) || n === 0 ? '—' : '$' + n.toFixed(2);
+  if (col.fmt === 'pct')     return isNaN(n) || n === 0 ? '—' : n.toFixed(2) + '%';   // TikTok returns pct already (e.g. 1.52 = 1.52%)
+  if (col.fmt === 'num')     return isNaN(n) || n === 0 ? '—' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : n.toFixed(0);
+  if (col.fmt === 'num2')    return isNaN(n) ? '—' : n.toFixed(2);
   return esc(String(v || '—'));
 }
 
