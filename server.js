@@ -378,6 +378,7 @@ app.get('/sample', requireAuth, async (req, res) => {
     { key: 'bid_strategy',  label: 'bid_strategy',   width: 16 },
     { key: 'bid_amount',    label: 'bid_amount',     width: 12 },
     { key: 'targeting',     label: 'targeting',      width: 16 },
+    { key: 'os',            label: 'os',             width: 12 },
     { key: 'language',      label: 'language',       width: 18 },
     { key: 'start_date',    label: 'start_date',     width: 14 },
     { key: 'start_time',    label: 'start_time',     width: 12 },
@@ -410,7 +411,7 @@ app.get('/sample', requireAuth, async (req, res) => {
   ws.addRow({
     account_name: accountNames[0], identity_name: identityNames[0],
     campaign_name: 'Example_Campaign_Jul', geo: 'US', budget: 30,
-    bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD', language: 'English',
+    bid_strategy: 'LOWEST_COST', bid_amount: '', targeting: 'BROAD', os: 'ALL', language: 'English',
     start_date: exampleDate, start_time: '00:00',
     video_url_1: 'https://videosapi.net/videos/example1.mp4',
     headline_1: 'Your headline here', headline_2: 'Second headline',
@@ -419,7 +420,7 @@ app.get('/sample', requireAuth, async (req, res) => {
   ws.addRow({
     account_name: accountNames[0], identity_name: identityNames[0],
     campaign_name: 'Example_Campaign_2_Jul', geo: 'US', budget: 50,
-    bid_strategy: 'COST_CAP', bid_amount: 0.75, targeting: 'AGE_35_PLUS', language: 'German',
+    bid_strategy: 'COST_CAP', bid_amount: 0.75, targeting: 'AGE_18_PLUS', os: 'ANDROID', language: 'German',
     start_date: exampleDate, start_time: '08:00',
     video_url_1: 'https://videosapi.net/videos/example2.mp4',
     headline_1: 'Another headline', headline_2: 'Try it today',
@@ -438,7 +439,8 @@ app.get('/sample', requireAuth, async (req, res) => {
     ws.getCell(row, colIndex.identity_name).dataValidation = { type: 'list', allowBlank: true, formulae: [identRef] };
     ws.getCell(row, colIndex.geo).dataValidation           = { type: 'list', allowBlank: true, formulae: [geoRef] };
     ws.getCell(row, colIndex.bid_strategy).dataValidation  = { type: 'list', allowBlank: true, formulae: ['"LOWEST_COST,COST_CAP"'] };
-    ws.getCell(row, colIndex.targeting).dataValidation     = { type: 'list', allowBlank: true, formulae: ['"BROAD,AGE_35_PLUS"'] };
+    ws.getCell(row, colIndex.targeting).dataValidation     = { type: 'list', allowBlank: true, formulae: ['"BROAD,AGE_18_PLUS,AGE_35_PLUS"'] };
+    ws.getCell(row, colIndex.os).dataValidation            = { type: 'list', allowBlank: true, formulae: ['"ALL,ANDROID,IOS"'] };
     ws.getCell(row, colIndex.language).dataValidation      = { type: 'list', allowBlank: true, formulae: [langRef] };
     // Date validation so blank cells also inherit calendar format
     ws.getCell(row, colIndex.start_date).dataValidation    = { type: 'date', allowBlank: true, operator: 'greaterThan', formulae: [new Date(2020, 0, 1)] };
@@ -536,7 +538,7 @@ app.post('/api/parse-csv', requireAuth, upload.single('csv'), async (req, res) =
       else if (!['LOWEST_COST','COST_CAP'].includes(bid_strategy)) validationErrors.push('bid_strategy must be LOWEST_COST or COST_CAP');
       if (bid_strategy === 'COST_CAP' && !bid_amount) validationErrors.push('bid_amount is required when bid_strategy is COST_CAP');
       if (!targeting)                       validationErrors.push('targeting is required');
-      else if (!['BROAD','AGE_35_PLUS'].includes(targeting)) validationErrors.push('targeting must be BROAD or AGE_35_PLUS');
+      else if (!['BROAD','AGE_18_PLUS','AGE_35_PLUS'].includes(targeting)) validationErrors.push('targeting must be BROAD, AGE_18_PLUS, or AGE_35_PLUS');
       if (!r.start_date?.trim())            validationErrors.push('start_date is required');
       if (!videos.length)                   validationErrors.push('at least one video_url is required');
       if (!headlines.length)                validationErrors.push('at least one headline is required');
@@ -925,7 +927,9 @@ async function createAdGroup(row, campaign_id, adv_id, pixel_id) {
 
   const targeting_spec = {
     location_ids: [location_id],
+    ...(row.targeting === 'AGE_18_PLUS' ? { age_groups: ['AGE_18_24', 'AGE_25_34', 'AGE_35_44', 'AGE_45_54', 'AGE_55_100'] } : {}),
     ...(row.targeting === 'AGE_35_PLUS' ? { age_groups: ['AGE_35_44', 'AGE_45_54', 'AGE_55_100'] } : {}),
+    ...(row.os && row.os !== 'ALL' ? { operating_systems: [row.os] } : {}),
     ...(langCode ? { languages: [langCode] } : {}),
   };
 
