@@ -1390,6 +1390,31 @@ app.post('/api/reporting/budget', requireAuth, async (req, res) => {
   res.json({ results });
 });
 
+// POST /api/reporting/status
+// Body: { adv_id, items: [{ type:'campaign'|'adgroup'|'ad', id }], action:'PAUSE'|'ENABLE' }
+app.post('/api/reporting/status', requireAuth, async (req, res) => {
+  const { adv_id = ADV_ID, items, action } = req.body;
+  if (!items?.length || !['PAUSE','ENABLE'].includes(action)) return res.status(400).json({ error: 'items and action (PAUSE|ENABLE) required' });
+  const results = [];
+  for (const item of items) {
+    const { type, id } = item;
+    try {
+      let r;
+      if (type === 'campaign') {
+        r = await ttPost('/smart_plus/campaign/status/update/', { campaign_id: id, opt_status: action }, adv_id);
+      } else if (type === 'adgroup') {
+        r = await ttPost('/smart_plus/adgroup/status/update/', { adgroup_id: id, opt_status: action }, adv_id);
+      } else {
+        r = await ttPost('/smart_plus/ad/status/update/', { ad_id: id, opt_status: action }, adv_id);
+      }
+      results.push({ id, ok: r.code === 0, code: r.code, message: r.message });
+    } catch (e) {
+      results.push({ id, ok: false, message: e.message });
+    }
+  }
+  res.json({ results });
+});
+
 // ── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Campaign launcher running at http://localhost:${PORT}`));

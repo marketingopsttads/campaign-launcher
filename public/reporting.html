@@ -665,6 +665,16 @@ function updateToolbar(level, count) {
     b1.textContent = '💰 Edit Budget';
     b1.onclick = openBudgetModal;
     actions.appendChild(b1);
+    const bPause = document.createElement('button');
+    bPause.className = 'btn btn-secondary btn-sm';
+    bPause.textContent = '⏸ Pause';
+    bPause.onclick = () => toggleStatus('campaign', 'PAUSE');
+    actions.appendChild(bPause);
+    const bEnable = document.createElement('button');
+    bEnable.className = 'btn btn-secondary btn-sm';
+    bEnable.textContent = '▶ Enable';
+    bEnable.onclick = () => toggleStatus('campaign', 'ENABLE');
+    actions.appendChild(bEnable);
   }
   if (level === 'adgroups') {
     const b1 = document.createElement('button');
@@ -677,6 +687,52 @@ function updateToolbar(level, count) {
     b2.textContent = '⚙ Change Bid Strategy';
     b2.onclick = openBidModal;
     actions.appendChild(b2);
+    const bPause = document.createElement('button');
+    bPause.className = 'btn btn-secondary btn-sm';
+    bPause.textContent = '⏸ Pause';
+    bPause.onclick = () => toggleStatus('adgroup', 'PAUSE');
+    actions.appendChild(bPause);
+    const bEnable = document.createElement('button');
+    bEnable.className = 'btn btn-secondary btn-sm';
+    bEnable.textContent = '▶ Enable';
+    bEnable.onclick = () => toggleStatus('adgroup', 'ENABLE');
+    actions.appendChild(bEnable);
+  }
+  if (level === 'ads') {
+    const bPause = document.createElement('button');
+    bPause.className = 'btn btn-secondary btn-sm';
+    bPause.textContent = '⏸ Pause';
+    bPause.onclick = () => toggleStatus('ad', 'PAUSE');
+    actions.appendChild(bPause);
+    const bEnable = document.createElement('button');
+    bEnable.className = 'btn btn-secondary btn-sm';
+    bEnable.textContent = '▶ Enable';
+    bEnable.onclick = () => toggleStatus('ad', 'ENABLE');
+    actions.appendChild(bEnable);
+  }
+}
+
+async function toggleStatus(type, action) {
+  const checked = [...state.selectedIds];
+  if (!checked.length) { return toast('Select at least one row first.', 'error'); }
+  const label = action === 'PAUSE' ? 'pause' : 'enable';
+  if (!confirm(`${label.charAt(0).toUpperCase() + label.slice(1)} ${checked.length} ${type}(s)?`)) return;
+  try {
+    const r = await fetch('/api/reporting/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: checked.map(id => ({ type, id })), action }),
+    });
+    const data = await r.json();
+    const failed = (data.results || []).filter(x => !x.ok);
+    if (failed.length) {
+      toast(`${data.results.length - failed.length} succeeded, ${failed.length} failed: ` + failed.map(x => x.message).join('; '), 'error');
+    } else {
+      toast(`✅ ${data.results.length} ${type}(s) ${label}d.`, 'success');
+    }
+    loadData();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
   }
 }
 
